@@ -19,6 +19,7 @@ package service
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/golang/glog"
@@ -145,6 +146,7 @@ func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
 	ip := svc.Annotations[constants.AnnKeyPublicIP]
 	if util.ParseIP(ip) != nil {
 		ports := k8sutil.MarkChangePorts(old, svc)
+		c.syncService(svc)
 		c.syncNAT(svc, ip, ports)
 		c.syncSecurity(svc, ip, ports)
 	}
@@ -196,6 +198,24 @@ func (c *ServiceController) deallocatePublicIP(svc *v1.Service) error {
 	return nil
 }
 
+// Sync the PA service object
+func (c *ServiceController) syncService(svc *v1.Service) {
+	n := util.ParseBool(svc.Annotations[constants.AnnKeyAllowNAT])
+	s := util.ParseBool(svc.Annotations[constants.AnnKeyAllowSecurity])
+
+	if n || s {
+		for _, port := range svc.Spec.Ports {
+			svcPort := strconv.Itoa(int(port.Port))
+			svcProtocol := strings.ToLower(string(port.Protocol))
+			name := fmt.Sprintf("k8s-%s%s", svcProtocol, svcPort)
+			if err := k8sutil.CreateOrUpdateService(c.inwinclient, name, svcPort, svcProtocol); err != nil {
+				glog.Errorf("Failed to create and update Service resource: %+v.", err)
+			}
+		}
+	}
+}
+
+// Sync the PA NAT policies
 func (c *ServiceController) syncNAT(svc *v1.Service, ip string, ports map[v1.ServicePort]bool) {
 	t := util.ParseBool(svc.Annotations[constants.AnnKeyAllowNAT])
 	for port, retain := range ports {
@@ -215,6 +235,7 @@ func (c *ServiceController) syncNAT(svc *v1.Service, ip string, ports map[v1.Ser
 	}
 }
 
+// Sync the PA Security policies
 func (c *ServiceController) syncSecurity(svc *v1.Service, ip string, ports map[v1.ServicePort]bool) {
 	t := util.ParseBool(svc.Annotations[constants.AnnKeyAllowSecurity])
 	for port, retain := range ports {
@@ -223,7 +244,10 @@ func (c *ServiceController) syncSecurity(svc *v1.Service, ip string, ports map[v
 		name := fmt.Sprintf("%s-%d", ip, port.Port)
 		switch {
 		case t && retain:
-			if err := k8sutil.CreateOrUpdateSecurity(c.inwinclient, name, ip, service, svc); err != nil {
+			log := c.conf.LogSettingName
+			group := c.conf.GroupName
+			err := k8sutil.CreateOrUpdateSecurity(c.inwinclient, name, ip, service, log, group, svc)
+			if err != nil {
 				glog.Errorf("Failed to create and update security resource: %+v.", err)
 			}
 		default:

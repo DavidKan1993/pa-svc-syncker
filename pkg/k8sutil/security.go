@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func newSecurity(name, srcAddr, portService string, svc *v1.Service) *inwinv1.Security {
+func newSecurity(name, addr, service, log, group string, svc *v1.Service) *inwinv1.Security {
 	return &inwinv1.Security{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -40,36 +40,38 @@ func newSecurity(name, srcAddr, portService string, svc *v1.Service) *inwinv1.Se
 			},
 		},
 		Spec: inwinv1.SecuritySpec{
-			Description:                     "Auto sync Security for Kubernetes.",
 			SourceZones:                     []string{"untrust"},
 			SourceAddresses:                 []string{"any"},
 			SourceUsers:                     []string{"any"},
 			HipProfiles:                     []string{"any"},
 			DestinationZones:                []string{"AI public service network"},
-			DestinationAddresses:            []string{srcAddr},
+			DestinationAddresses:            []string{addr},
 			Applications:                    []string{"any"},
-			Services:                        []string{portService},
+			Services:                        []string{service},
 			Categories:                      []string{"any"},
 			Action:                          "allow",
 			IcmpUnreachable:                 false,
 			DisableServerResponseInspection: false,
 			LogEnd:                          true,
+			LogSetting:                      log,
+			Group:                           group,
+			Description:                     "Auto sync Security for Kubernetes.",
 		},
 	}
 }
 
-func CreateOrUpdateSecurity(c inwinclientset.InwinstackV1Interface, name, srcAddr, portService string, svc *v1.Service) error {
+func CreateOrUpdateSecurity(c inwinclientset.InwinstackV1Interface, name, addr, service, log, group string, svc *v1.Service) error {
 	sec, err := c.Securities(svc.Namespace).Get(name, metav1.GetOptions{})
 	if err == nil {
-		sec.Spec.DestinationAddresses = []string{srcAddr}
-		sec.Spec.Services = []string{portService}
+		sec.Spec.DestinationAddresses = []string{addr}
+		sec.Spec.Services = []string{service}
 		if _, err := c.Securities(svc.Namespace).Update(sec); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	newSec := newSecurity(name, srcAddr, portService, svc)
+	newSec := newSecurity(name, addr, service, log, group, svc)
 	if _, err := c.Securities(svc.Namespace).Create(newSec); err != nil {
 		return err
 	}

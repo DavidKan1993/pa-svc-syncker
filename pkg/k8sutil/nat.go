@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func newNAT(name, srcAddr, service string, port int32, svc *v1.Service) *inwinv1.NAT {
+func newNAT(name, addr, service string, port int32, svc *v1.Service) *inwinv1.NAT {
 	return &inwinv1.NAT{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -41,10 +41,9 @@ func newNAT(name, srcAddr, service string, port int32, svc *v1.Service) *inwinv1
 		},
 		Spec: inwinv1.NATSpec{
 			Type:                 inwinv1.NATIPv4,
-			Description:          "Auto sync NAT for Kubernetes.",
 			SourceZones:          []string{"untrust"},
 			SourceAddresses:      []string{"any"},
-			DestinationAddresses: []string{srcAddr},
+			DestinationAddresses: []string{addr},
 			DestinationZone:      "untrust",
 			ToInterface:          "any",
 			Service:              service,
@@ -52,14 +51,15 @@ func newNAT(name, srcAddr, service string, port int32, svc *v1.Service) *inwinv1
 			DatType:              inwinv1.NATDatStatic,
 			DatAddress:           svc.Spec.ExternalIPs[0],
 			DatPort:              port,
+			Description:          "Auto sync NAT for Kubernetes.",
 		},
 	}
 }
 
-func CreateOrUpdateNAT(c inwinclientset.InwinstackV1Interface, name, srcAddr, service string, port int32, svc *v1.Service) error {
+func CreateOrUpdateNAT(c inwinclientset.InwinstackV1Interface, name, addr, service string, port int32, svc *v1.Service) error {
 	nat, err := c.NATs(svc.Namespace).Get(name, metav1.GetOptions{})
 	if err == nil {
-		nat.Spec.DestinationAddresses = []string{srcAddr}
+		nat.Spec.DestinationAddresses = []string{addr}
 		nat.Spec.DatAddress = svc.Spec.ExternalIPs[0]
 		nat.Spec.DatPort = port
 		if _, err := c.NATs(svc.Namespace).Update(nat); err != nil {
@@ -68,7 +68,7 @@ func CreateOrUpdateNAT(c inwinclientset.InwinstackV1Interface, name, srcAddr, se
 		return nil
 	}
 
-	newNAT := newNAT(name, srcAddr, service, port, svc)
+	newNAT := newNAT(name, addr, service, port, svc)
 	if _, err := c.NATs(svc.Namespace).Create(newNAT); err != nil {
 		return err
 	}
