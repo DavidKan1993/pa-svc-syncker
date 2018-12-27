@@ -1,9 +1,6 @@
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "true"
-    inwinstack.com/allow-nat-policy: "true"
   labels:
     run: nginx
   name: nginx1
@@ -11,7 +8,7 @@ metadata:
 spec:
   type: ClusterIP
   externalIPs:
-  - 172.22.132.192
+  - 172.22.132.160
   ports:
   - name: http-80
     port: 80
@@ -23,9 +20,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "true"
-    inwinstack.com/allow-nat-policy: "true"
   labels:
     run: nginx
   name: nginx2
@@ -33,29 +27,7 @@ metadata:
 spec:
   type: ClusterIP
   externalIPs:
-  - 172.22.132.193
-  ports:
-  - name: http-80
-    port: 80
-    protocol: TCP
-    targetPort: 80
-  selector:
-    run: nginx
----
-apiVersion: v1
-kind: Service
-metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "true"
-    inwinstack.com/allow-nat-policy: "true"
-  labels:
-    run: nginx
-  name: nginx3
-  namespace: test
-spec:
-  type: ClusterIP
-  externalIPs:
-  - 172.22.132.192
+  - 172.22.132.160
   ports:
   - name: http-8080
     port: 8080
@@ -67,17 +39,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "true"
-    inwinstack.com/allow-nat-policy: "true"
   labels:
     run: nginx
-  name: nginx4
+  name: nginx3
   namespace: test
 spec:
   type: ClusterIP
   externalIPs:
-  - 172.22.132.192
+  - 172.22.132.160
   ports:
   - name: http-8088
     port: 8088
@@ -89,9 +58,25 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "true"
-    inwinstack.com/allow-nat-policy: "true"
+  labels:
+    run: nginx
+  name: nginx4
+  namespace: test
+spec:
+  type: ClusterIP
+  externalIPs:
+  - 172.22.132.160
+  ports:
+  - name: udp-8088
+    port: 8088
+    protocol: UDP
+    targetPort: 8088
+  selector:
+    run: nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
   labels:
     run: nginx
   name: nginx5
@@ -99,11 +84,38 @@ metadata:
 spec:
   type: ClusterIP
   externalIPs:
-  - 172.22.132.193
+  - 172.22.132.160
   ports:
-  - name: http-8088
-    port: 8088
+  - name: udp-80
+    port: 80
+    protocol: UDP
+    targetPort: 80
+  selector:
+    run: nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    run: nginx
+  name: nginx6
+  namespace: test
+spec:
+  type: ClusterIP
+  externalIPs:
+  - 172.22.132.160
+  ports:
+  - name: tcp-8011
+    port: 8011
     protocol: TCP
+    targetPort: 80
+  - name: tcp-8033
+    port: 8033
+    protocol: TCP
+    targetPort: 80
+  - name: udp-8044
+    port: 8044
+    protocol: UDP
     targetPort: 80
   selector:
     run: nginx

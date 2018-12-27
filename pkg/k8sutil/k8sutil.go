@@ -49,19 +49,3 @@ func FilterServices(svcs *v1.ServiceList, addr string) {
 	}
 	svcs.Items = items
 }
-
-func MarkChangePorts(old *v1.Service, new *v1.Service) map[v1.ServicePort]bool {
-	ports := map[v1.ServicePort]bool{}
-	if old != nil {
-		oldSpec := old.Spec.DeepCopy()
-		for _, o := range oldSpec.Ports {
-			ports[o] = false
-		}
-	}
-
-	newSpec := new.Spec.DeepCopy()
-	for _, n := range newSpec.Ports {
-		ports[n] = true
-	}
-	return ports
-}

@@ -23,13 +23,13 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
 	opkit "github.com/inwinstack/operator-kit"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
 	"github.com/inwinstack/pa-svc-syncker/pkg/util"
-	"github.com/inwinstack/pa-svc-syncker/pkg/util/slice"
+	slice "github.com/thoas/go-funk"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -44,13 +44,13 @@ var Resource = opkit.CustomResource{
 }
 
 type ServiceController struct {
-	ctx         *opkit.Context
-	inwinclient inwinclientset.InwinstackV1Interface
-	conf        *config.OperatorConfig
+	ctx    *opkit.Context
+	client clientset.InwinstackV1Interface
+	conf   *config.OperatorConfig
 }
 
-func NewController(ctx *opkit.Context, client inwinclientset.InwinstackV1Interface, conf *config.OperatorConfig) *ServiceController {
-	return &ServiceController{ctx: ctx, inwinclient: client, conf: conf}
+func NewController(ctx *opkit.Context, client clientset.InwinstackV1Interface, conf *config.OperatorConfig) *ServiceController {
+	return &ServiceController{ctx: ctx, client: client, conf: conf}
 }
 
 func (c *ServiceController) StartWatch(namespace string, stopCh chan struct{}) error {
@@ -100,22 +100,14 @@ func (c *ServiceController) onDelete(obj interface{}) {
 		return
 	}
 
-	if err := c.deallocatePublicIP(svc); err != nil {
-		glog.Errorf("Failed to deallocate IP on Service %s in %s namespace: %+v.", svc.Name, svc.Namespace, err)
+	if err := c.cleanup(svc); err != nil {
+		glog.Errorf("Failed to cleanup on Service %s in %s namespace: %+v.", svc.Name, svc.Namespace, err)
 	}
 }
 
 func (c *ServiceController) makeAnnotations(svc *v1.Service) {
 	if svc.Annotations == nil {
 		svc.Annotations = map[string]string{}
-	}
-
-	if _, ok := svc.Annotations[constants.AnnKeyAllowSecurity]; !ok {
-		svc.Annotations[constants.AnnKeyAllowSecurity] = "false"
-	}
-
-	if _, ok := svc.Annotations[constants.AnnKeyAllowNAT]; !ok {
-		svc.Annotations[constants.AnnKeyAllowNAT] = "false"
 	}
 
 	if _, ok := svc.Annotations[constants.AnnKeyExternalPool]; !ok {
@@ -139,16 +131,15 @@ func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
 		return nil
 	}
 
-	if err := c.allocatePublicIP(svc); err != nil {
+	if err := c.allocate(svc); err != nil {
 		glog.Errorf("Failed to allocate Public IP: %s.", err)
 	}
 
-	ip := svc.Annotations[constants.AnnKeyPublicIP]
-	if util.ParseIP(ip) != nil {
-		ports := k8sutil.MarkChangePorts(old, svc)
-		c.syncService(svc)
-		c.syncNAT(svc, ip, ports)
-		c.syncSecurity(svc, ip, ports)
+	addr := svc.Annotations[constants.AnnKeyPublicIP]
+	if util.ParseIP(addr) != nil {
+		c.syncService(svc, addr)
+		c.syncNAT(svc, addr)
+		c.syncSecurity(svc, addr)
 	}
 
 	c.makeRefresh(svc)
@@ -158,12 +149,12 @@ func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
 	return nil
 }
 
-func (c *ServiceController) allocatePublicIP(svc *v1.Service) error {
+func (c *ServiceController) allocate(svc *v1.Service) error {
 	pool := svc.Annotations[constants.AnnKeyExternalPool]
 	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
 	if public == nil && pool != "" {
 		name := svc.Spec.ExternalIPs[0]
-		ip, err := c.inwinclient.IPs(svc.Namespace).Get(name, metav1.GetOptions{})
+		ip, err := c.client.IPs(svc.Namespace).Get(name, metav1.GetOptions{})
 		if err == nil {
 			if ip.Status.Address != "" {
 				delete(svc.Annotations, constants.AnnKeyServiceRefresh)
@@ -173,14 +164,56 @@ func (c *ServiceController) allocatePublicIP(svc *v1.Service) error {
 		}
 
 		newIP := k8sutil.NewIP(svc.Spec.ExternalIPs[0], svc.Namespace, pool)
-		if _, err := c.inwinclient.IPs(svc.Namespace).Create(newIP); err != nil {
+		if _, err := c.client.IPs(svc.Namespace).Create(newIP); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *ServiceController) deallocatePublicIP(svc *v1.Service) error {
+// Sync the PA service object
+func (c *ServiceController) syncService(svc *v1.Service, addr string) {
+	portMap := map[string][]string{}
+	for _, p := range svc.Spec.Ports {
+		port := strconv.Itoa(int(p.Port))
+		protocol := strings.ToLower(string(p.Protocol))
+		portMap[protocol] = append(portMap[protocol], port)
+	}
+
+	for protocol, ports := range portMap {
+		name := fmt.Sprintf("k8s-%s-%s", addr, protocol)
+		portsStr := strings.Join(ports, ",")
+		if err := k8sutil.CreateOrUpdateService(c.client, name, portsStr, protocol); err != nil {
+			glog.Warningf("Failed to create and update Service resource: %+v.", err)
+		}
+	}
+}
+
+// Sync the PA NAT policies
+func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
+	name := fmt.Sprintf("k8s-%s", addr)
+	if err := k8sutil.CreateNAT(c.client, name, addr, svc); err != nil {
+		glog.Warningf("Failed to create NAT resource: %+v.", err)
+	}
+}
+
+// Sync the PA Security policies
+func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
+	services := []string{}
+	for _, p := range svc.Spec.Ports {
+		protocol := strings.ToLower(string(p.Protocol))
+		services = append(services, fmt.Sprintf("k8s-%s-%s", addr, protocol))
+	}
+
+	name := fmt.Sprintf("k8s-%s", addr)
+	log := c.conf.LogSettingName
+	group := c.conf.GroupName
+	if err := k8sutil.CreateOrUpdateSecurity(c.client, name, addr, log, group, services, svc); err != nil {
+		glog.Warningf("Failed to create and update Security resource: %+v.", err)
+	}
+}
+
+func (c *ServiceController) cleanup(svc *v1.Service) error {
 	pool := svc.Annotations[constants.AnnKeyExternalPool]
 	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
 	if public != nil && pool != "" {
@@ -193,67 +226,30 @@ func (c *ServiceController) deallocatePublicIP(svc *v1.Service) error {
 		if len(svcs.Items) != 0 {
 			return nil
 		}
-		return c.inwinclient.IPs(svc.Namespace).Delete(svc.Spec.ExternalIPs[0], nil)
+
+		if err := c.client.IPs(svc.Namespace).Delete(svc.Spec.ExternalIPs[0], nil); err != nil {
+			return err
+		}
+
+		name := fmt.Sprintf("k8s-%s", public.String())
+		if err := c.client.Securities(svc.Namespace).Delete(name, nil); err != nil {
+			glog.Warningf("Failed to delete Security resource: %+v.", err)
+		}
+
+		if err := c.client.NATs(svc.Namespace).Delete(name, nil); err != nil {
+			glog.Warningf("Failed to delete NAT resource: %+v.", err)
+		}
+
+		tcpName := fmt.Sprintf("%s-tcp", name)
+		if err := c.client.Services().Delete(tcpName, nil); err != nil {
+			glog.Warningf("Failed to delete TCP service resource: %+v.", err)
+		}
+
+		udpName := fmt.Sprintf("%s-udp", name)
+		if err := c.client.Services().Delete(udpName, nil); err != nil {
+			glog.Warningf("Failed to delete UDP service resource: %+v.", err)
+		}
+		return nil
 	}
 	return nil
-}
-
-// Sync the PA service object
-func (c *ServiceController) syncService(svc *v1.Service) {
-	n := util.ParseBool(svc.Annotations[constants.AnnKeyAllowNAT])
-	s := util.ParseBool(svc.Annotations[constants.AnnKeyAllowSecurity])
-
-	if n || s {
-		for _, port := range svc.Spec.Ports {
-			svcPort := strconv.Itoa(int(port.Port))
-			svcProtocol := strings.ToLower(string(port.Protocol))
-			name := fmt.Sprintf("k8s-%s%s", svcProtocol, svcPort)
-			if err := k8sutil.CreateOrUpdateService(c.inwinclient, name, svcPort, svcProtocol); err != nil {
-				glog.Errorf("Failed to create and update Service resource: %+v.", err)
-			}
-		}
-	}
-}
-
-// Sync the PA NAT policies
-func (c *ServiceController) syncNAT(svc *v1.Service, ip string, ports map[v1.ServicePort]bool) {
-	t := util.ParseBool(svc.Annotations[constants.AnnKeyAllowNAT])
-	for port, retain := range ports {
-		proto := strings.ToLower(string(port.Protocol))
-		service := fmt.Sprintf("k8s-%s%d", proto, port.Port)
-		name := fmt.Sprintf("%s-%d", ip, port.Port)
-		switch {
-		case t && retain:
-			if err := k8sutil.CreateOrUpdateNAT(c.inwinclient, name, ip, service, port.Port, svc); err != nil {
-				glog.Errorf("Failed to create and update NAT resource: %+v.", err)
-			}
-		default:
-			if err := c.inwinclient.NATs(svc.Namespace).Delete(name, nil); err != nil {
-				glog.Warningf("Failed to delete NAT resource: %+v.", err)
-			}
-		}
-	}
-}
-
-// Sync the PA Security policies
-func (c *ServiceController) syncSecurity(svc *v1.Service, ip string, ports map[v1.ServicePort]bool) {
-	t := util.ParseBool(svc.Annotations[constants.AnnKeyAllowSecurity])
-	for port, retain := range ports {
-		proto := strings.ToLower(string(port.Protocol))
-		service := fmt.Sprintf("k8s-%s%d", proto, port.Port)
-		name := fmt.Sprintf("%s-%d", ip, port.Port)
-		switch {
-		case t && retain:
-			log := c.conf.LogSettingName
-			group := c.conf.GroupName
-			err := k8sutil.CreateOrUpdateSecurity(c.inwinclient, name, ip, service, log, group, svc)
-			if err != nil {
-				glog.Errorf("Failed to create and update security resource: %+v.", err)
-			}
-		default:
-			if err := c.inwinclient.Securities(svc.Namespace).Delete(name, nil); err != nil {
-				glog.Warningf("Failed to delete security resource: %+v.", err)
-			}
-		}
-	}
 }

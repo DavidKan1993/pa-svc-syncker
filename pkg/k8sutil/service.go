@@ -17,12 +17,15 @@ limitations under the License.
 package k8sutil
 
 import (
+	"strings"
+
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	slice "github.com/thoas/go-funk"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func newService(name, port, protocol string) *inwinv1.Service {
+func newService(name, ports, protocol string) *inwinv1.Service {
 	return &inwinv1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -30,24 +33,31 @@ func newService(name, port, protocol string) *inwinv1.Service {
 		Spec: inwinv1.ServiceSpec{
 			SourcePort:      "",
 			Protocol:        protocol,
-			DestinationPort: port,
+			DestinationPort: ports,
 			Description:     "Auto sync Service for Kubernetes.",
 		},
 	}
 }
 
-func CreateOrUpdateService(c inwinclientset.InwinstackV1Interface, name, port, protocol string) error {
+func appendPort(old string, new string) string {
+	ports := strings.Split(old, ",")
+	addPorts := strings.Split(new, ",")
+	ports = append([]string{}, append(ports, addPorts...)...)
+	return strings.Join(slice.UniqString(ports), ",")
+}
+
+func CreateOrUpdateService(c clientset.InwinstackV1Interface, name, ports, protocol string) error {
 	svc, err := c.Services().Get(name, metav1.GetOptions{})
 	if err == nil {
 		svc.Spec.Protocol = protocol
-		svc.Spec.DestinationPort = port
+		svc.Spec.DestinationPort = appendPort(svc.Spec.DestinationPort, ports)
 		if _, err := c.Services().Update(svc); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	newSvc := newService(name, port, protocol)
+	newSvc := newService(name, ports, protocol)
 	if _, err := c.Services().Create(newSvc); err != nil {
 		return err
 	}

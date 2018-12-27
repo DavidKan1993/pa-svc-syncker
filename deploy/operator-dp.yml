@@ -19,9 +19,8 @@ spec:
       serviceAccountName: pa-svc-syncker
       containers:
       - name: pa-svc-syncker
-        image: inwinstack/pa-svc-syncker:v0.5.0
+        image: inwinstack/pa-svc-syncker:v0.6.0
         args:
-        - --logtostderr=true
         - --v=2
-        - --ignore-namespaces=kube-system,default,kube-public,metallb-system
-        - --retry=5
+        - --logtostderr
+        - --ignore-namespaces=kube-system,default,kube-public

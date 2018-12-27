@@ -17,27 +17,18 @@ limitations under the License.
 package k8sutil
 
 import (
-	"reflect"
-
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	slice "github.com/thoas/go-funk"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func newSecurity(name, addr, service, log, group string, svc *v1.Service) *inwinv1.Security {
+func newSecurity(name, addr, log, group string, services []string, svc *v1.Service) *inwinv1.Security {
 	return &inwinv1.Security{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: svc.Namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(svc, schema.GroupVersionKind{
-					Group:   v1.SchemeGroupVersion.Group,
-					Version: v1.SchemeGroupVersion.Version,
-					Kind:    reflect.TypeOf(v1.Service{}).Name(),
-				}),
-			},
 		},
 		Spec: inwinv1.SecuritySpec{
 			SourceZones:                     []string{"untrust"},
@@ -47,7 +38,7 @@ func newSecurity(name, addr, service, log, group string, svc *v1.Service) *inwin
 			DestinationZones:                []string{"AI public service network"},
 			DestinationAddresses:            []string{addr},
 			Applications:                    []string{"any"},
-			Services:                        []string{service},
+			Services:                        services,
 			Categories:                      []string{"any"},
 			Action:                          "allow",
 			IcmpUnreachable:                 false,
@@ -60,18 +51,19 @@ func newSecurity(name, addr, service, log, group string, svc *v1.Service) *inwin
 	}
 }
 
-func CreateOrUpdateSecurity(c inwinclientset.InwinstackV1Interface, name, addr, service, log, group string, svc *v1.Service) error {
+func CreateOrUpdateSecurity(c clientset.InwinstackV1Interface, name, addr, log, group string, services []string, svc *v1.Service) error {
 	sec, err := c.Securities(svc.Namespace).Get(name, metav1.GetOptions{})
 	if err == nil {
+		newServices := append([]string{}, append(sec.Spec.Services, services...)...)
 		sec.Spec.DestinationAddresses = []string{addr}
-		sec.Spec.Services = []string{service}
+		sec.Spec.Services = slice.UniqString(newServices)
 		if _, err := c.Securities(svc.Namespace).Update(sec); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	newSec := newSecurity(name, addr, service, log, group, svc)
+	newSec := newSecurity(name, addr, log, group, services, svc)
 	if _, err := c.Securities(svc.Namespace).Create(newSec); err != nil {
 		return err
 	}

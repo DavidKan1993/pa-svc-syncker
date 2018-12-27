@@ -1,27 +1,26 @@
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
-    inwinstack.com/allow-security-policy: "false"
-    inwinstack.com/allow-nat-policy: "false"
   labels:
     run: nginx
-  name: nginx
+  name: nginx1
   namespace: test
 spec:
+  type: ClusterIP
   externalIPs:
-  - 172.29.188.2
-  externalTrafficPolicy: Cluster
+  - 172.22.132.160
   ports:
-  - name: http-80
+  - name: tcp-80
     port: 80
     protocol: TCP
     targetPort: 80
-  - name: http-8080
+  - name: tcp-8080
     port: 8080
     protocol: TCP
     targetPort: 80
+  - name: udp-8080
+    port: 8080
+    protocol: UDP
+    targetPort: 80
   selector:
     run: nginx
-  sessionAffinity: None
-  type: LoadBalancer

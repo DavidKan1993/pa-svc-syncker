@@ -17,27 +17,17 @@ limitations under the License.
 package k8sutil
 
 import (
-	"reflect"
-
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func newNAT(name, addr, service string, port int32, svc *v1.Service) *inwinv1.NAT {
+func newNAT(name, addr string, svc *v1.Service) *inwinv1.NAT {
 	return &inwinv1.NAT{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: svc.Namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(svc, schema.GroupVersionKind{
-					Group:   v1.SchemeGroupVersion.Group,
-					Version: v1.SchemeGroupVersion.Version,
-					Kind:    reflect.TypeOf(v1.Service{}).Name(),
-				}),
-			},
 		},
 		Spec: inwinv1.NATSpec{
 			Type:                 inwinv1.NATIPv4,
@@ -46,29 +36,21 @@ func newNAT(name, addr, service string, port int32, svc *v1.Service) *inwinv1.NA
 			DestinationAddresses: []string{addr},
 			DestinationZone:      "untrust",
 			ToInterface:          "any",
-			Service:              service,
+			Service:              "any",
 			SatType:              inwinv1.NATSatNone,
 			DatType:              inwinv1.NATDatStatic,
 			DatAddress:           svc.Spec.ExternalIPs[0],
-			DatPort:              port,
-			Description:          "Auto sync NAT for Kubernetes.",
+			Description:          "Auto sync DNAT for Kubernetes.",
 		},
 	}
 }
 
-func CreateOrUpdateNAT(c inwinclientset.InwinstackV1Interface, name, addr, service string, port int32, svc *v1.Service) error {
-	nat, err := c.NATs(svc.Namespace).Get(name, metav1.GetOptions{})
-	if err == nil {
-		nat.Spec.DestinationAddresses = []string{addr}
-		nat.Spec.DatAddress = svc.Spec.ExternalIPs[0]
-		nat.Spec.DatPort = port
-		if _, err := c.NATs(svc.Namespace).Update(nat); err != nil {
-			return err
-		}
+func CreateNAT(c clientset.InwinstackV1Interface, name, addr string, svc *v1.Service) error {
+	if _, err := c.NATs(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
 		return nil
 	}
 
-	newNAT := newNAT(name, addr, service, port, svc)
+	newNAT := newNAT(name, addr, svc)
 	if _, err := c.NATs(svc.Namespace).Create(newNAT); err != nil {
 		return err
 	}
