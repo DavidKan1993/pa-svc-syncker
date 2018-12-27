@@ -21,8 +21,10 @@ import (
 
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
 	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	slice "github.com/thoas/go-funk"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
 )
 
 func newService(name, ports, protocol string) *inwinv1.Service {
@@ -46,19 +48,30 @@ func appendPort(old string, new string) string {
 	return strings.Join(slice.UniqString(ports), ",")
 }
 
-func CreateOrUpdateService(c clientset.InwinstackV1Interface, name, ports, protocol string) error {
-	svc, err := c.Services().Get(name, metav1.GetOptions{})
+func makeToCommit(svc *inwinv1.Service) {
+	if svc.Annotations == nil {
+		svc.Annotations = map[string]string{}
+	}
+
+	if _, ok := svc.Annotations[constants.AnnKeyServiceRefresh]; !ok {
+		svc.Annotations[constants.AnnKeyServiceRefresh] = string(uuid.NewUUID())
+	}
+}
+
+func CreateOrUpdateService(c clientset.InwinstackV1Interface, name, ports, protocol, namespace string) error {
+	svc, err := c.Services(namespace).Get(name, metav1.GetOptions{})
 	if err == nil {
 		svc.Spec.Protocol = protocol
 		svc.Spec.DestinationPort = appendPort(svc.Spec.DestinationPort, ports)
-		if _, err := c.Services().Update(svc); err != nil {
+		makeToCommit(svc)
+		if _, err := c.Services(namespace).Update(svc); err != nil {
 			return err
 		}
 		return nil
 	}
 
 	newSvc := newService(name, ports, protocol)
-	if _, err := c.Services().Create(newSvc); err != nil {
+	if _, err := c.Services(namespace).Create(newSvc); err != nil {
 		return err
 	}
 	return nil

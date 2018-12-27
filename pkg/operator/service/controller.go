@@ -183,7 +183,7 @@ func (c *ServiceController) syncService(svc *v1.Service, addr string) {
 	for protocol, ports := range portMap {
 		name := fmt.Sprintf("k8s-%s-%s", addr, protocol)
 		portsStr := strings.Join(ports, ",")
-		if err := k8sutil.CreateOrUpdateService(c.client, name, portsStr, protocol); err != nil {
+		if err := k8sutil.CreateOrUpdateService(c.client, name, portsStr, protocol, svc.Namespace); err != nil {
 			glog.Warningf("Failed to create and update Service resource: %+v.", err)
 		}
 	}
@@ -241,12 +241,12 @@ func (c *ServiceController) cleanup(svc *v1.Service) error {
 		}
 
 		tcpName := fmt.Sprintf("%s-tcp", name)
-		if err := c.client.Services().Delete(tcpName, nil); err != nil {
+		if err := c.client.Services(svc.Namespace).Delete(tcpName, nil); err != nil {
 			glog.Warningf("Failed to delete TCP service resource: %+v.", err)
 		}
 
 		udpName := fmt.Sprintf("%s-udp", name)
-		if err := c.client.Services().Delete(udpName, nil); err != nil {
+		if err := c.client.Services(svc.Namespace).Delete(udpName, nil); err != nil {
 			glog.Warningf("Failed to delete UDP service resource: %+v.", err)
 		}
 		return nil
