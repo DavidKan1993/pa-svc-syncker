@@ -19,8 +19,6 @@ package service
 import (
 	"fmt"
 	"reflect"
-	"strconv"
-	"strings"
 
 	"github.com/golang/glog"
 	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
@@ -137,7 +135,6 @@ func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
 
 	addr := svc.Annotations[constants.AnnKeyPublicIP]
 	if util.ParseIP(addr) != nil {
-		c.syncService(svc, addr)
 		c.syncNAT(svc, addr)
 		c.syncSecurity(svc, addr)
 	}
@@ -171,24 +168,6 @@ func (c *ServiceController) allocate(svc *v1.Service) error {
 	return nil
 }
 
-// Sync the PA service object
-func (c *ServiceController) syncService(svc *v1.Service, addr string) {
-	portMap := map[string][]string{}
-	for _, p := range svc.Spec.Ports {
-		port := strconv.Itoa(int(p.Port))
-		protocol := strings.ToLower(string(p.Protocol))
-		portMap[protocol] = append(portMap[protocol], port)
-	}
-
-	for protocol, ports := range portMap {
-		name := fmt.Sprintf("k8s-%s-%s", addr, protocol)
-		portsStr := strings.Join(ports, ",")
-		if err := k8sutil.CreateOrUpdateService(c.client, name, portsStr, protocol, svc.Namespace); err != nil {
-			glog.Warningf("Failed to create and update Service resource: %+v.", err)
-		}
-	}
-}
-
 // Sync the PA NAT policies
 func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
 	name := fmt.Sprintf("k8s-%s", addr)
@@ -199,16 +178,11 @@ func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
 
 // Sync the PA Security policies
 func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
-	services := []string{}
-	for _, p := range svc.Spec.Ports {
-		protocol := strings.ToLower(string(p.Protocol))
-		services = append(services, fmt.Sprintf("k8s-%s-%s", addr, protocol))
-	}
-
 	name := fmt.Sprintf("k8s-%s", addr)
 	log := c.conf.LogSettingName
 	group := c.conf.GroupName
-	if err := k8sutil.CreateOrUpdateSecurity(c.client, name, addr, log, group, services, svc); err != nil {
+	services := c.conf.Services
+	if err := k8sutil.CreateSecurity(c.client, name, addr, log, group, services, svc); err != nil {
 		glog.Warningf("Failed to create and update Security resource: %+v.", err)
 	}
 }
@@ -238,16 +212,6 @@ func (c *ServiceController) cleanup(svc *v1.Service) error {
 
 		if err := c.client.NATs(svc.Namespace).Delete(name, nil); err != nil {
 			glog.Warningf("Failed to delete NAT resource: %+v.", err)
-		}
-
-		tcpName := fmt.Sprintf("%s-tcp", name)
-		if err := c.client.Services(svc.Namespace).Delete(tcpName, nil); err != nil {
-			glog.Warningf("Failed to delete TCP service resource: %+v.", err)
-		}
-
-		udpName := fmt.Sprintf("%s-udp", name)
-		if err := c.client.Services(svc.Namespace).Delete(udpName, nil); err != nil {
-			glog.Warningf("Failed to delete UDP service resource: %+v.", err)
 		}
 		return nil
 	}

@@ -1,0 +1,9 @@
+apiVersion: inwinstack.com/v1
+kind: Service
+metadata:
+  name: k8s-udp
+spec:
+  protocol: udp
+  sourcePort: ""
+  destinationPort: "50000-60000"
+  description: "Kubernetes UDP ports"

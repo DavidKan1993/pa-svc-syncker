@@ -19,6 +19,7 @@ package config
 type OperatorConfig struct {
 	Kubeconfig       string
 	IgnoreNamespaces []string
+	Services         []string
 	Retry            int
 	LogSettingName   string
 	GroupName        string

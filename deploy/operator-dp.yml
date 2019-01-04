@@ -19,8 +19,9 @@ spec:
       serviceAccountName: pa-svc-syncker
       containers:
       - name: pa-svc-syncker
-        image: inwinstack/pa-svc-syncker:v0.6.2
+        image: inwinstack/pa-svc-syncker:v0.6.3
         args:
         - --v=2
         - --logtostderr
         - --ignore-namespaces=kube-system,default,kube-public
+        - --services=k8s-tcp,k8s-udp

@@ -15,6 +15,7 @@ import (
 var (
 	kubeconfig string
 	namespaces []string
+	services   []string
 	retry      int
 	logSetting string
 	group      string
@@ -24,6 +25,7 @@ var (
 func parserFlags() {
 	flag.StringVarP(&kubeconfig, "kubeconfig", "", "", "Absolute path to the kubeconfig file.")
 	flag.StringSliceVarP(&namespaces, "ignore-namespaces", "", nil, "Set ignore namespaces for Kubernetes service.")
+	flag.StringSliceVarP(&services, "services", "", []string{"k8s-tcp", "k8s-udp"}, "The security policies service objects.")
 	flag.IntVarP(&retry, "retry", "", 5, "Number of retry for PA failed job.")
 	flag.StringVarP(&logSetting, "log-setting", "", "", "The security policies log-setting name.")
 	flag.StringVarP(&group, "group", "", "", "The security policies group name.")
@@ -47,6 +49,7 @@ func main() {
 		Kubeconfig:       kubeconfig,
 		IgnoreNamespaces: namespaces,
 		Retry:            retry,
+		Services:         services,
 		GroupName:        group,
 		LogSettingName:   logSetting,
 	}
