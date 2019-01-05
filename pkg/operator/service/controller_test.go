@@ -54,8 +54,8 @@ func TestController(t *testing.T) {
 			Address: "140.11.22.33",
 		},
 	}
-	_, svcerr := client.InwinstackV1().IPs("default").Create(ip)
-	assert.Nil(t, svcerr)
+	_, iperr := client.InwinstackV1().IPs("default").Create(ip)
+	assert.Nil(t, iperr)
 
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -76,8 +76,8 @@ func TestController(t *testing.T) {
 			},
 		},
 	}
-	_, iperr := coreClient.CoreV1().Services("default").Create(svc)
-	assert.Nil(t, iperr)
+	_, svcerr := coreClient.CoreV1().Services("default").Create(svc)
+	assert.Nil(t, svcerr)
 
 	ctx := &opkit.Context{
 		Clientset:             coreClient,
