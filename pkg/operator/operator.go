@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned"
 	opkit "github.com/inwinstack/operator-kit"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
@@ -61,7 +61,7 @@ func (o *Operator) Initialize() error {
 	return nil
 }
 
-func (o *Operator) initContextAndClient() (*opkit.Context, inwinclientset.InwinstackV1Interface, error) {
+func (o *Operator) initContextAndClient() (*opkit.Context, clientset.Interface, error) {
 	glog.V(2).Info("Initialize the operator context and client.")
 
 	config, err := k8sutil.GetRestConfig(o.conf.Kubeconfig)
@@ -79,9 +79,9 @@ func (o *Operator) initContextAndClient() (*opkit.Context, inwinclientset.Inwins
 		return nil, nil, fmt.Errorf("Failed to create Kubernetes API extension clientset. %+v", err)
 	}
 
-	inwinclient, err := inwinclientset.NewForConfig(config)
+	inwinclient, err := clientset.NewForConfig(config)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create inwinstack clientset. %+v", err)
+		return nil, nil, fmt.Errorf("Failed to create blended clientset. %+v", err)
 	}
 
 	ctx := &opkit.Context{

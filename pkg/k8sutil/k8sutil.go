@@ -19,6 +19,8 @@ package k8sutil
 import (
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -37,6 +39,14 @@ func GetRestConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func GetServiceList(c kubernetes.Interface, namespace string) (*v1.ServiceList, error) {
+	return c.CoreV1().Services(namespace).List(metav1.ListOptions{})
+}
+
+func UpdateService(c kubernetes.Interface, namespace string, svc *v1.Service) (*v1.Service, error) {
+	return c.CoreV1().Services(namespace).Update(svc)
 }
 
 func FilterServices(svcs *v1.ServiceList, addr string) {

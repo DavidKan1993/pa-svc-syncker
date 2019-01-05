@@ -21,7 +21,7 @@ import (
 	"reflect"
 
 	"github.com/golang/glog"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned"
 	opkit "github.com/inwinstack/operator-kit"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
@@ -29,7 +29,6 @@ import (
 	"github.com/inwinstack/pa-svc-syncker/pkg/util"
 	slice "github.com/thoas/go-funk"
 	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/cache"
 )
@@ -43,11 +42,11 @@ var Resource = opkit.CustomResource{
 
 type ServiceController struct {
 	ctx    *opkit.Context
-	client clientset.InwinstackV1Interface
+	client clientset.Interface
 	conf   *config.OperatorConfig
 }
 
-func NewController(ctx *opkit.Context, client clientset.InwinstackV1Interface, conf *config.OperatorConfig) *ServiceController {
+func NewController(ctx *opkit.Context, client clientset.Interface, conf *config.OperatorConfig) *ServiceController {
 	return &ServiceController{ctx: ctx, client: client, conf: conf}
 }
 
@@ -140,7 +139,7 @@ func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
 	}
 
 	c.makeRefresh(svc)
-	if _, err := c.ctx.Clientset.CoreV1().Services(svc.Namespace).Update(svc); err != nil {
+	if _, err := k8sutil.UpdateService(c.ctx.Clientset, svc.Namespace, svc); err != nil {
 		return err
 	}
 	return nil
@@ -151,7 +150,8 @@ func (c *ServiceController) allocate(svc *v1.Service) error {
 	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
 	if public == nil && pool != "" {
 		name := svc.Spec.ExternalIPs[0]
-		ip, err := c.client.IPs(svc.Namespace).Get(name, metav1.GetOptions{})
+		namespace := svc.Namespace
+		ip, err := k8sutil.GetIP(c.client, name, namespace)
 		if err == nil {
 			if ip.Status.Address != "" {
 				delete(svc.Annotations, constants.AnnKeyServiceRefresh)
@@ -160,8 +160,7 @@ func (c *ServiceController) allocate(svc *v1.Service) error {
 			return nil
 		}
 
-		newIP := k8sutil.NewIP(svc.Spec.ExternalIPs[0], svc.Namespace, pool)
-		if _, err := c.client.IPs(svc.Namespace).Create(newIP); err != nil {
+		if _, err := k8sutil.CreateIP(c.client, name, namespace, pool); err != nil {
 			return err
 		}
 	}
@@ -191,7 +190,8 @@ func (c *ServiceController) cleanup(svc *v1.Service) error {
 	pool := svc.Annotations[constants.AnnKeyExternalPool]
 	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
 	if public != nil && pool != "" {
-		svcs, err := c.ctx.Clientset.CoreV1().Services(svc.Namespace).List(metav1.ListOptions{})
+		namespace := svc.Namespace
+		svcs, err := k8sutil.GetServiceList(c.ctx.Clientset, namespace)
 		if err != nil {
 			return err
 		}
@@ -201,16 +201,16 @@ func (c *ServiceController) cleanup(svc *v1.Service) error {
 			return nil
 		}
 
-		if err := c.client.IPs(svc.Namespace).Delete(svc.Spec.ExternalIPs[0], nil); err != nil {
+		if err := k8sutil.DeleteIP(c.client, svc.Spec.ExternalIPs[0], namespace); err != nil {
 			return err
 		}
 
 		name := fmt.Sprintf("k8s-%s", public.String())
-		if err := c.client.Securities(svc.Namespace).Delete(name, nil); err != nil {
+		if err := k8sutil.DeleteSecurity(c.client, name, namespace); err != nil {
 			glog.Warningf("Failed to delete Security resource: %+v.", err)
 		}
 
-		if err := c.client.NATs(svc.Namespace).Delete(name, nil); err != nil {
+		if err := k8sutil.DeleteNAT(c.client, name, namespace); err != nil {
 			glog.Warningf("Failed to delete NAT resource: %+v.", err)
 		}
 		return nil

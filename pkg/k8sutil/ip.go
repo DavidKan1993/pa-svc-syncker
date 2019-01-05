@@ -21,7 +21,7 @@ import (
 
 	"github.com/golang/glog"
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	inwinclientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-func NewIP(name, namespace, poolName string) *inwinv1.IP {
+func newIP(name, namespace, poolName string) *inwinv1.IP {
 	return &inwinv1.IP{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -42,14 +42,27 @@ func NewIP(name, namespace, poolName string) *inwinv1.IP {
 	}
 }
 
-func WaitForIP(c inwinclientset.InwinstackV1Interface, ns, name string, timeout time.Duration) error {
+func GetIP(c clientset.Interface, name, namespace string) (*inwinv1.IP, error) {
+	return c.InwinstackV1().IPs(namespace).Get(name, metav1.GetOptions{})
+}
+
+func CreateIP(c clientset.Interface, name, namespace, poolName string) (*inwinv1.IP, error) {
+	newIP := newIP(name, namespace, poolName)
+	return c.InwinstackV1().IPs(namespace).Create(newIP)
+}
+
+func DeleteIP(c clientset.Interface, name, namespace string) error {
+	return c.InwinstackV1().IPs(namespace).Delete(name, nil)
+}
+
+func WaitForIP(c clientset.Interface, ns, name string, timeout time.Duration) error {
 	opts := metav1.ListOptions{
 		FieldSelector: fields.Set{
 			"metadata.name":      name,
 			"metadata.namespace": ns,
 		}.AsSelector().String()}
 
-	w, err := c.IPs(ns).Watch(opts)
+	w, err := c.InwinstackV1().IPs(ns).Watch(opts)
 	if err != nil {
 		return err
 	}

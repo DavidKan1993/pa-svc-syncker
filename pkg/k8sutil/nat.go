@@ -18,7 +18,7 @@ package k8sutil
 
 import (
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -45,14 +45,18 @@ func newNAT(name, addr string, svc *v1.Service) *inwinv1.NAT {
 	}
 }
 
-func CreateNAT(c clientset.InwinstackV1Interface, name, addr string, svc *v1.Service) error {
-	if _, err := c.NATs(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
+func CreateNAT(c clientset.Interface, name, addr string, svc *v1.Service) error {
+	if _, err := c.InwinstackV1().NATs(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
 		return nil
 	}
 
 	newNAT := newNAT(name, addr, svc)
-	if _, err := c.NATs(svc.Namespace).Create(newNAT); err != nil {
+	if _, err := c.InwinstackV1().NATs(svc.Namespace).Create(newNAT); err != nil {
 		return err
 	}
 	return nil
+}
+
+func DeleteNAT(c clientset.Interface, name, namespace string) error {
+	return c.InwinstackV1().NATs(namespace).Delete(name, nil)
 }

@@ -18,7 +18,7 @@ package k8sutil
 
 import (
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned/typed/inwinstack/v1"
+	clientset "github.com/inwinstack/blended/client/clientset/versioned"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -50,14 +50,18 @@ func newSecurity(name, addr, log, group string, services []string, svc *v1.Servi
 	}
 }
 
-func CreateSecurity(c clientset.InwinstackV1Interface, name, addr, log, group string, services []string, svc *v1.Service) error {
-	if _, err := c.Securities(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
+func CreateSecurity(c clientset.Interface, name, addr, log, group string, services []string, svc *v1.Service) error {
+	if _, err := c.InwinstackV1().Securities(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
 		return nil
 	}
 
 	newSec := newSecurity(name, addr, log, group, services, svc)
-	if _, err := c.Securities(svc.Namespace).Create(newSec); err != nil {
+	if _, err := c.InwinstackV1().Securities(svc.Namespace).Create(newSec); err != nil {
 		return err
 	}
 	return nil
+}
+
+func DeleteSecurity(c clientset.Interface, name, namespace string) error {
+	return c.InwinstackV1().Securities(namespace).Delete(name, nil)
 }
