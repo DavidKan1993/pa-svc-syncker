@@ -92,6 +92,7 @@ func TestController(t *testing.T) {
 		Services:         []string{"k8s-tcp", "k8s-udp"},
 		GroupName:        "",
 		LogSettingName:   "",
+		DestinationZones: []string{"test"},
 	}
 	controller := NewController(ctx, client, conf)
 
@@ -116,7 +117,8 @@ func TestController(t *testing.T) {
 
 	sec, err := client.InwinstackV1().Securities("default").Get(name, metav1.GetOptions{})
 	assert.Equal(t, ip.Status.Address, sec.Spec.DestinationAddresses[0])
-	assert.Equal(t, []string{"k8s-tcp", "k8s-udp"}, sec.Spec.Services)
+	assert.Equal(t, conf.Services, sec.Spec.Services)
+	assert.Equal(t, conf.DestinationZones, sec.Spec.DestinationZones)
 
 	// Test onDelete
 	assert.Nil(t, coreClient.CoreV1().Services("default").Delete("test-svc", nil))

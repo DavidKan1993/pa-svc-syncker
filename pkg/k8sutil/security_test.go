@@ -34,11 +34,20 @@ func TestSecurity(t *testing.T) {
 	}
 
 	client := fake.NewSimpleClientset()
-	assert.Nil(t, CreateSecurity(client, "test-sec", "140.11.22.33", "", "", []string{"k8s-tcp"}, svc))
+	para := &SecurityParameter{
+		Name:             "test-sec",
+		Address:          "140.11.22.33",
+		Log:              "",
+		Group:            "",
+		Services:         []string{"k8s-tcp"},
+		DestinationZones: []string{"AI public service network"},
+	}
+	assert.Nil(t, CreateSecurity(client, para, svc))
 
-	sec, err := client.InwinstackV1().Securities(svc.Namespace).Get("test-sec", metav1.GetOptions{})
+	sec, err := client.InwinstackV1().Securities(svc.Namespace).Get(para.Name, metav1.GetOptions{})
 	assert.Nil(t, err)
-	assert.Equal(t, "140.11.22.33", sec.Spec.DestinationAddresses[0])
-	assert.Equal(t, []string{"k8s-tcp"}, sec.Spec.Services)
-	assert.Nil(t, DeleteSecurity(client, "test-sec", svc.Namespace))
+	assert.Equal(t, para.Address, sec.Spec.DestinationAddresses[0])
+	assert.Equal(t, para.Services, sec.Spec.Services)
+	assert.Equal(t, para.DestinationZones, sec.Spec.DestinationZones)
+	assert.Nil(t, DeleteSecurity(client, para.Name, svc.Namespace))
 }

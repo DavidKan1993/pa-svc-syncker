@@ -22,7 +22,7 @@ spec:
       serviceAccountName: pa-svc-syncker
       containers:
       - name: pa-svc-syncker
-        image: inwinstack/pa-svc-syncker:v0.6.4
+        image: inwinstack/pa-svc-syncker:v0.6.5
         args:
         - --v=2
         - --logtostderr=true

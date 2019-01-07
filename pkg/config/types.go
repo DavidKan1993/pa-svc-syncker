@@ -20,6 +20,7 @@ type OperatorConfig struct {
 	Kubeconfig       string
 	IgnoreNamespaces []string
 	Services         []string
+	DestinationZones []string
 	Retry            int
 	LogSettingName   string
 	GroupName        string

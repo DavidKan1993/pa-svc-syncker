@@ -23,10 +23,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func newSecurity(name, addr, log, group string, services []string, svc *v1.Service) *inwinv1.Security {
+type SecurityParameter struct {
+	Name             string
+	Address          string
+	Log              string
+	Group            string
+	Services         []string
+	DestinationZones []string
+}
+
+func newSecurity(para *SecurityParameter, svc *v1.Service) *inwinv1.Security {
 	return &inwinv1.Security{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      para.Name,
 			Namespace: svc.Namespace,
 		},
 		Spec: inwinv1.SecuritySpec{
@@ -34,28 +43,28 @@ func newSecurity(name, addr, log, group string, services []string, svc *v1.Servi
 			SourceAddresses:                 []string{"any"},
 			SourceUsers:                     []string{"any"},
 			HipProfiles:                     []string{"any"},
-			DestinationZones:                []string{"AI public service network"},
-			DestinationAddresses:            []string{addr},
+			DestinationZones:                para.DestinationZones,
+			DestinationAddresses:            []string{para.Address},
 			Applications:                    []string{"any"},
-			Services:                        services,
+			Services:                        para.Services,
 			Categories:                      []string{"any"},
 			Action:                          "allow",
 			IcmpUnreachable:                 false,
 			DisableServerResponseInspection: false,
 			LogEnd:                          true,
-			LogSetting:                      log,
-			Group:                           group,
+			LogSetting:                      para.Log,
+			Group:                           para.Group,
 			Description:                     "Auto sync Security for Kubernetes.",
 		},
 	}
 }
 
-func CreateSecurity(c clientset.Interface, name, addr, log, group string, services []string, svc *v1.Service) error {
-	if _, err := c.InwinstackV1().Securities(svc.Namespace).Get(name, metav1.GetOptions{}); err == nil {
+func CreateSecurity(c clientset.Interface, para *SecurityParameter, svc *v1.Service) error {
+	if _, err := c.InwinstackV1().Securities(svc.Namespace).Get(para.Name, metav1.GetOptions{}); err == nil {
 		return nil
 	}
 
-	newSec := newSecurity(name, addr, log, group, services, svc)
+	newSec := newSecurity(para, svc)
 	if _, err := c.InwinstackV1().Securities(svc.Namespace).Create(newSec); err != nil {
 		return err
 	}

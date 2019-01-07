@@ -13,19 +13,21 @@ import (
 )
 
 var (
-	kubeconfig string
-	namespaces []string
-	services   []string
-	retry      int
-	logSetting string
-	group      string
-	ver        bool
+	kubeconfig       string
+	namespaces       []string
+	services         []string
+	destinationZones []string
+	retry            int
+	logSetting       string
+	group            string
+	ver              bool
 )
 
 func parserFlags() {
 	flag.StringVarP(&kubeconfig, "kubeconfig", "", "", "Absolute path to the kubeconfig file.")
 	flag.StringSliceVarP(&namespaces, "ignore-namespaces", "", nil, "Set ignore namespaces for Kubernetes service.")
 	flag.StringSliceVarP(&services, "services", "", []string{"k8s-tcp", "k8s-udp"}, "The security policies service objects.")
+	flag.StringSliceVarP(&destinationZones, "destination-zones", "", []string{"AI public service network"}, "Public destination zones.")
 	flag.IntVarP(&retry, "retry", "", 5, "Number of retry for PA failed job.")
 	flag.StringVarP(&logSetting, "log-setting", "", "", "The security policies log-setting name.")
 	flag.StringVarP(&group, "group", "", "", "The security policies group name.")
@@ -48,6 +50,7 @@ func main() {
 	conf := &config.OperatorConfig{
 		Kubeconfig:       kubeconfig,
 		IgnoreNamespaces: namespaces,
+		DestinationZones: destinationZones,
 		Retry:            retry,
 		Services:         services,
 		GroupName:        group,

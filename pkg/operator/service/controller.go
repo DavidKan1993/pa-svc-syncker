@@ -178,10 +178,16 @@ func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
 // Sync the PA Security policies
 func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
 	name := fmt.Sprintf("k8s-%s", addr)
-	log := c.conf.LogSettingName
-	group := c.conf.GroupName
-	services := c.conf.Services
-	if err := k8sutil.CreateSecurity(c.client, name, addr, log, group, services, svc); err != nil {
+
+	secPara := &k8sutil.SecurityParameter{
+		Name:             name,
+		Address:          addr,
+		Log:              c.conf.LogSettingName,
+		Group:            c.conf.GroupName,
+		Services:         c.conf.Services,
+		DestinationZones: c.conf.DestinationZones,
+	}
+	if err := k8sutil.CreateSecurity(c.client, secPara, svc); err != nil {
 		glog.Warningf("Failed to create and update Security resource: %+v.", err)
 	}
 }
