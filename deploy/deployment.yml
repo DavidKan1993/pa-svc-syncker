@@ -13,7 +13,10 @@ spec:
       labels:
         app: pa-svc-syncker
     spec:
+      priorityClassName: system-cluster-critical
       tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
       - effect: NoSchedule
         key: node-role.kubernetes.io/master
       serviceAccountName: pa-svc-syncker
@@ -22,6 +25,6 @@ spec:
         image: inwinstack/pa-svc-syncker:v0.6.4
         args:
         - --v=2
-        - --logtostderr
+        - --logtostderr=true
         - --ignore-namespaces=kube-system,default,kube-public
         - --services=k8s-tcp,k8s-udp
