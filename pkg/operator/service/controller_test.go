@@ -46,8 +46,7 @@ func TestController(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: inwinv1.IPSpec{
-			PoolName:        "internet",
-			UpdateNamespace: false,
+			PoolName: "internet",
 		},
 		Status: inwinv1.IPStatus{
 			Phase:   inwinv1.IPActive,

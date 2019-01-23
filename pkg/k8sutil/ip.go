@@ -36,8 +36,7 @@ func newIP(name, namespace, poolName string) *inwinv1.IP {
 			Namespace: namespace,
 		},
 		Spec: inwinv1.IPSpec{
-			PoolName:        poolName,
-			UpdateNamespace: false,
+			PoolName: poolName,
 		},
 	}
 }

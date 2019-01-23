@@ -2,6 +2,21 @@
 # PA Kubernetes Service Syncker
 The PA Service Syncker for Kubernetes provides automation synchronizing definitions for Kubernetes services to set the PA NAT, Security, and Service.
 
+### Requirements
+The PA Service Syncker depend on [IPAM](https://github.com/inwinstack/ipam) and [PA Controller](https://github.com/inwinstack/pa-controller).
+
+#### Compatibility Matrix
+
+| PA Controller version | 0.6.x | 0.5.x | 
+|-----------------------|-------|-------|
+| 0.6.x                 | Y     | Y     |
+| 0.5.x                 | Y     | Y     |
+
+| IPAM version | 0.6.x | 0.5.x | 
+|--------------|-------|-------|
+| 0.6.x        | Y     | Y     |
+| 0.5.x        | Y     | Y     |
+
 ## Building from Source
 Clone repo into your go path under `$GOPATH/src`:
 ```sh
