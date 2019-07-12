@@ -31,7 +31,7 @@ import (
 	corefake "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,6 +39,19 @@ func TestController(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	coreClient := corefake.NewSimpleClientset()
 	extensionsClient := extensionsfake.NewSimpleClientset()
+
+	ns := &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "default",
+			Namespace: "",
+			Annotations: map[string]string{
+				constants.AnnKeyExternalPool:       "internet",
+				constants.AnnKeyWhiteListAddresses: "172.22.132.99, 172.22.131.0/32",
+			},
+		},
+	}
+	_, nserr := coreClient.CoreV1().Namespaces().Create(ns)
+	assert.Nil(t, nserr)
 
 	ip := &inwinv1.IP{
 		ObjectMeta: metav1.ObjectMeta{

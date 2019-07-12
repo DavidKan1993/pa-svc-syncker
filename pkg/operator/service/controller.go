@@ -19,6 +19,7 @@ package service
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/golang/glog"
 	clientset "github.com/inwinstack/blended/client/clientset/versioned"
@@ -28,7 +29,8 @@ import (
 	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
 	"github.com/inwinstack/pa-svc-syncker/pkg/util"
 	slice "github.com/thoas/go-funk"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/cache"
 )
@@ -177,8 +179,16 @@ func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
 
 // Sync the PA Security policies
 func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
-	name := fmt.Sprintf("k8s-%s", addr)
+	addrs := []string{"any"}
+	ns, _ := c.ctx.Clientset.CoreV1().Namespaces().Get(svc.Namespace, metav1.GetOptions{})
+	if value, ok := ns.Annotations[constants.AnnKeyWhiteListAddresses]; ok {
+		addrString := strings.TrimSpace(value)
+		if len(addrString) > 0 {
+			addrs = strings.Split(addrString, ",")
+		}
+	}
 
+	name := fmt.Sprintf("k8s-%s", addr)
 	secPara := &k8sutil.SecurityParameter{
 		Name:             name,
 		Address:          addr,
@@ -186,6 +196,7 @@ func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
 		Group:            c.conf.GroupName,
 		Services:         c.conf.Services,
 		DestinationZones: c.conf.DestinationZones,
+		SourceAddresses:  addrs,
 	}
 	if err := k8sutil.CreateSecurity(c.client, secPara, svc); err != nil {
 		glog.Warningf("Failed to create and update Security resource: %+v.", err)

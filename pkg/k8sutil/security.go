@@ -19,7 +19,7 @@ package k8sutil
 import (
 	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
 	clientset "github.com/inwinstack/blended/client/clientset/versioned"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,6 +30,7 @@ type SecurityParameter struct {
 	Group            string
 	Services         []string
 	DestinationZones []string
+	SourceAddresses  []string
 }
 
 func newSecurity(para *SecurityParameter, svc *v1.Service) *inwinv1.Security {
@@ -40,7 +41,7 @@ func newSecurity(para *SecurityParameter, svc *v1.Service) *inwinv1.Security {
 		},
 		Spec: inwinv1.SecuritySpec{
 			SourceZones:                     []string{"untrust"},
-			SourceAddresses:                 []string{"any"},
+			SourceAddresses:                 para.SourceAddresses,
 			SourceUsers:                     []string{"any"},
 			HipProfiles:                     []string{"any"},
 			DestinationZones:                para.DestinationZones,
@@ -73,4 +74,19 @@ func CreateSecurity(c clientset.Interface, para *SecurityParameter, svc *v1.Serv
 
 func DeleteSecurity(c clientset.Interface, name, namespace string) error {
 	return c.InwinstackV1().Securities(namespace).Delete(name, nil)
+}
+
+func UpdateSecuritiesSourceIPs(c clientset.Interface, namespace string, addrs []string) error {
+	secs, err := c.InwinstackV1().Securities(namespace).List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, sec := range secs.Items {
+		sec.Spec.SourceAddresses = addrs
+		if _, err := c.InwinstackV1().Securities(namespace).Update(&sec); err != nil {
+			return err
+		}
+	}
+	return nil
 }

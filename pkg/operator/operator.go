@@ -28,8 +28,9 @@ import (
 	opkit "github.com/inwinstack/operator-kit"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
+	"github.com/inwinstack/pa-svc-syncker/pkg/operator/namespace"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator/service"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/kubernetes"
 )
@@ -41,9 +42,10 @@ const (
 )
 
 type Operator struct {
-	ctx     *opkit.Context
-	conf    *config.OperatorConfig
-	service *service.ServiceController
+	ctx       *opkit.Context
+	conf      *config.OperatorConfig
+	service   *service.ServiceController
+	namespace *namespace.NamespaceController
 }
 
 func NewMainOperator(conf *config.OperatorConfig) *Operator {
@@ -57,6 +59,7 @@ func (o *Operator) Initialize() error {
 	}
 
 	o.service = service.NewController(ctx, clientset, o.conf)
+	o.namespace = namespace.NewController(ctx, clientset, o.conf)
 	o.ctx = ctx
 	return nil
 }
@@ -100,6 +103,7 @@ func (o *Operator) Run() error {
 
 	// start watching the resources
 	o.service.StartWatch(v1.NamespaceAll, stopChan)
+	o.namespace.StartWatch(v1.NamespaceAll, stopChan)
 
 	for {
 		select {

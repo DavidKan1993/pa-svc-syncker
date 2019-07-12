@@ -29,4 +29,6 @@ const (
 	AnnKeyPublicIP = "inwinstack.com/allocated-public-ip"
 	// AnnKeyServiceRefresh set in Service to refresh the annotations
 	AnnKeyServiceRefresh = "inwinstack.com/service-refresh"
+	// AnnKeyWhiteListAddresses is the key of annotations for the whitelist
+	AnnKeyWhiteListAddresses = "inwinstack.com/whitelist-addresses"
 )
