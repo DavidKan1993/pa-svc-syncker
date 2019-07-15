@@ -13,7 +13,7 @@ rules:
   - ""
   resources:
   - services
-  - namespace
+  - namespaces
   verbs:
   - "*"
 - apiGroups:
