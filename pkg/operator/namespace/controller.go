@@ -1,5 +1,5 @@
 /*
-Copyright © 2018 inwinSTACK.inc
+Copyright © 2018 inwinSTACK Inc
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,84 +17,162 @@ limitations under the License.
 package namespace
 
 import (
-	"reflect"
-	"strings"
+	"context"
+	"fmt"
+	"time"
 
 	"github.com/golang/glog"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned"
-	opkit "github.com/inwinstack/operator-kit"
+	blended "github.com/inwinstack/blended/client/clientset/versioned"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
-	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
-	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
-	slice "github.com/thoas/go-funk"
+	"github.com/inwinstack/pa-svc-syncker/pkg/operator/service"
+	"github.com/thoas/go-funk"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	informerv1 "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/kubernetes"
+	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 )
 
-var Resource = opkit.CustomResource{
-	Name:    "namespace",
-	Plural:  "namespaces",
-	Version: "v1",
-	Kind:    reflect.TypeOf(v1.Namespace{}).Name(),
+// Controller represents the controller of namespace
+type Controller struct {
+	cfg *config.Config
+
+	clientset  kubernetes.Interface
+	blendedset blended.Interface
+	lister     listerv1.NamespaceLister
+	synced     cache.InformerSynced
+	queue      workqueue.RateLimitingInterface
 }
 
-type NamespaceController struct {
-	ctx    *opkit.Context
-	client clientset.Interface
-	cfg    *config.OperatorConfig
+// NewController creates an instance of the namespace controller
+func NewController(
+	cfg *config.Config,
+	clientset kubernetes.Interface,
+	blendedset blended.Interface,
+	informer informerv1.NamespaceInformer) *Controller {
+
+	controller := &Controller{
+		cfg:        cfg,
+		clientset:  clientset,
+		blendedset: blendedset,
+		lister:     informer.Lister(),
+		synced:     informer.Informer().HasSynced,
+		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Namespaces"),
+	}
+	glog.Info("Setting up the Namespace event handlers.")
+
+	informer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.enqueue,
+		UpdateFunc: func(old, new interface{}) {
+			controller.enqueue(new)
+		},
+	})
+	return controller
 }
 
-func NewController(ctx *opkit.Context, client clientset.Interface, cfg *config.OperatorConfig) *NamespaceController {
-	return &NamespaceController{ctx: ctx, client: client, cfg: cfg}
-}
-
-func (c *NamespaceController) StartWatch(namespace string, stopCh chan struct{}) error {
-	resourceHandlerFuncs := cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onAdd,
-		UpdateFunc: c.onUpdate,
+// Run serves the namespace controller
+func (c *Controller) Run(ctx context.Context, threadiness int) error {
+	glog.Info("Starting Namespace controller")
+	glog.Info("Waiting for Namespace informer caches to sync")
+	if ok := cache.WaitForCacheSync(ctx.Done(), c.synced); !ok {
+		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
-	glog.Info("Start watching service resources.")
-	watcher := opkit.NewWatcher(Resource, namespace, resourceHandlerFuncs, c.ctx.Clientset.CoreV1().RESTClient())
-	go watcher.Watch(&v1.Namespace{}, stopCh)
+	glog.Info("Starting Namespace workers")
+	for i := 0; i < threadiness; i++ {
+		go wait.Until(c.runWorker, time.Second, ctx.Done())
+	}
+
+	glog.Info("Started Namespace workers")
 	return nil
 }
 
-func (c *NamespaceController) onAdd(obj interface{}) {
-	ns := obj.(*v1.Namespace).DeepCopy()
-	glog.V(2).Infof("Received add on %s namespace.", ns.Name)
+// Stop stops the namespace controller
+func (c *Controller) Stop() {
+	glog.Info("Stopping the Namespace controller")
+	c.queue.ShutDown()
+}
 
-	if ns.Status.Phase == v1.NamespaceActive {
-		if err := c.updateSecurityPolicies(ns); err != nil {
-			glog.Errorf("Failed to add sources addresss to all policies on %s namespace.: %+v.", ns.Name, err)
-		}
+func (c *Controller) runWorker() {
+	defer utilruntime.HandleCrash()
+	for c.processNextWorkItem() {
 	}
 }
 
-func (c *NamespaceController) onUpdate(oldObj, newObj interface{}) {
-	ns := newObj.(*v1.Namespace).DeepCopy()
-	glog.V(2).Infof("Received update on %s namespace.", ns.Name)
+func (c *Controller) processNextWorkItem() bool {
+	obj, shutdown := c.queue.Get()
 
-	if ns.Status.Phase == v1.NamespaceActive {
-		if err := c.updateSecurityPolicies(ns); err != nil {
-			glog.Errorf("Failed to add sources addresss to all policies on %s namespace.: %+v.", ns.Name, err)
-		}
+	if shutdown {
+		return false
 	}
-}
 
-func (c *NamespaceController) updateSecurityPolicies(ns *v1.Namespace) error {
-	if slice.Contains(c.cfg.IgnoreNamespaces, ns.Name) {
+	err := func(obj interface{}) error {
+		defer c.queue.Done(obj)
+		key, ok := obj.(string)
+		if !ok {
+			c.queue.Forget(obj)
+			utilruntime.HandleError(fmt.Errorf("Namespace controller expected string in workqueue but got %#v", obj))
+			return nil
+		}
+
+		if err := c.reconcile(key); err != nil {
+			c.queue.AddRateLimited(key)
+			return fmt.Errorf("Namespace controller error syncing '%s': %s, requeuing", key, err.Error())
+		}
+
+		c.queue.Forget(obj)
+		glog.Infof("Namespace controller successfully synced '%s'", key)
 		return nil
+	}(obj)
+
+	if err != nil {
+		utilruntime.HandleError(err)
+		return true
+	}
+	return true
+}
+
+func (c *Controller) enqueue(obj interface{}) {
+	ns := obj.(*v1.Namespace).DeepCopy()
+
+	if funk.Contains(c.cfg.IgnoreNamespaces, ns.Name) {
+		glog.V(3).Infof("Namespace controller ignored '%s'", ns.Name)
+		return
 	}
 
-	addrs := []string{"any"}
-	if value, ok := ns.Annotations[constants.AnnKeyWhiteListAddresses]; ok {
-		addrString := strings.TrimSpace(value)
-		if len(addrString) > 0 {
-			addrs = strings.Split(addrString, ",")
-		}
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
 	}
-	if err := k8sutil.UpdateSecuritiesSourceIPs(c.client, ns.Name, addrs); err != nil {
+	c.queue.Add(key)
+}
+
+func (c *Controller) reconcile(key string) error {
+	_, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
+		return err
+	}
+
+	if _, err := c.lister.Get(name); err != nil {
+		if errors.IsNotFound(err) {
+			utilruntime.HandleError(fmt.Errorf("namespace '%s' in work queue no longer exists", key))
+			return err
+		}
+		return err
+	}
+
+	sourceAddresses, err := service.ParseAddresses(c.clientset, name)
+	if err != nil {
+		return err
+	}
+
+	if err := c.updateSecurity(name, sourceAddresses); err != nil {
 		return err
 	}
 	return nil

@@ -1,5 +1,5 @@
 /*
-Copyright © 2018 inwinSTACK.inc
+Copyright © 2018 inwinSTACK Inc
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,220 +17,279 @@ limitations under the License.
 package service
 
 import (
+	"context"
 	"fmt"
-	"reflect"
-	"strings"
+	"net"
+	"time"
 
 	"github.com/golang/glog"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned"
-	opkit "github.com/inwinstack/operator-kit"
+	blended "github.com/inwinstack/blended/client/clientset/versioned"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
-	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
-	"github.com/inwinstack/pa-svc-syncker/pkg/util"
-	slice "github.com/thoas/go-funk"
+	"github.com/thoas/go-funk"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/uuid"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	informerv1 "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/kubernetes"
+	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 )
 
-var Resource = opkit.CustomResource{
-	Name:    "service",
-	Plural:  "services",
-	Version: "v1",
-	Kind:    reflect.TypeOf(v1.Service{}).Name(),
+// Controller represents the controller of service
+type Controller struct {
+	cfg *config.Config
+
+	clientset  kubernetes.Interface
+	blendedset blended.Interface
+	lister     listerv1.ServiceLister
+	synced     cache.InformerSynced
+	queue      workqueue.RateLimitingInterface
 }
 
-type ServiceController struct {
-	ctx    *opkit.Context
-	client clientset.Interface
-	conf   *config.OperatorConfig
+// NewController creates an instance of the service controller
+func NewController(
+	cfg *config.Config,
+	clientset kubernetes.Interface,
+	blendedset blended.Interface,
+	informer informerv1.ServiceInformer) *Controller {
+
+	controller := &Controller{
+		cfg:        cfg,
+		clientset:  clientset,
+		blendedset: blendedset,
+		lister:     informer.Lister(),
+		synced:     informer.Informer().HasSynced,
+		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Services"),
+	}
+	glog.Info("Setting up the Service event handlers.")
+
+	informer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.enqueue,
+		UpdateFunc: func(old, new interface{}) {
+			controller.enqueue(new)
+		},
+	})
+	return controller
 }
 
-func NewController(ctx *opkit.Context, client clientset.Interface, conf *config.OperatorConfig) *ServiceController {
-	return &ServiceController{ctx: ctx, client: client, conf: conf}
-}
-
-func (c *ServiceController) StartWatch(namespace string, stopCh chan struct{}) error {
-	resourceHandlerFuncs := cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onAdd,
-		UpdateFunc: c.onUpdate,
-		DeleteFunc: c.onDelete,
+// Run serves the service controller
+func (c *Controller) Run(ctx context.Context, threadiness int) error {
+	glog.Info("Starting Service controller")
+	glog.Info("Waiting for Service informer caches to sync")
+	if ok := cache.WaitForCacheSync(ctx.Done(), c.synced); !ok {
+		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
-	glog.Info("Start watching service resources.")
-	watcher := opkit.NewWatcher(Resource, namespace, resourceHandlerFuncs, c.ctx.Clientset.CoreV1().RESTClient())
-	go watcher.Watch(&v1.Service{}, stopCh)
+	glog.Info("Starting Service workers")
+	for i := 0; i < threadiness; i++ {
+		go wait.Until(c.runWorker, time.Second, ctx.Done())
+	}
+
+	glog.Info("Started Service workers")
 	return nil
 }
 
-func (c *ServiceController) onAdd(obj interface{}) {
-	svc := obj.(*v1.Service).DeepCopy()
-	glog.V(2).Infof("Received add on Service %s in %s namespace.", svc.Name, svc.Namespace)
+// Stop stops the service controller
+func (c *Controller) Stop() {
+	glog.Info("Stopping the Service controller")
+	c.queue.ShutDown()
+}
 
-	c.makeAnnotations(svc)
-	if err := c.syncSpec(nil, svc); err != nil {
-		glog.Errorf("Failed to sync spec on Service %s in %s namespace: %+v.", svc.Name, svc.Namespace, err)
+func (c *Controller) runWorker() {
+	defer utilruntime.HandleCrash()
+	for c.processNextWorkItem() {
 	}
 }
 
-func (c *ServiceController) onUpdate(oldObj, newObj interface{}) {
-	old := oldObj.(*v1.Service).DeepCopy()
-	svc := newObj.(*v1.Service).DeepCopy()
-	glog.V(2).Infof("Received update on Service %s in %s namespace.", svc.Name, svc.Namespace)
+func (c *Controller) processNextWorkItem() bool {
+	obj, shutdown := c.queue.Get()
 
-	if svc.DeletionTimestamp == nil {
-		if err := c.syncSpec(old, svc); err != nil {
-			glog.Errorf("Failed to sync spec on Service %s in %s namespace: %+v.", svc.Name, svc.Namespace, err)
+	if shutdown {
+		return false
+	}
+
+	err := func(obj interface{}) error {
+		defer c.queue.Done(obj)
+		key, ok := obj.(string)
+		if !ok {
+			c.queue.Forget(obj)
+			utilruntime.HandleError(fmt.Errorf("Service controller expected string in workqueue but got %#v", obj))
+			return nil
 		}
+
+		if err := c.reconcile(key); err != nil {
+			c.queue.AddRateLimited(key)
+			return fmt.Errorf("Service controller error syncing '%s': %s, requeuing", key, err.Error())
+		}
+
+		c.queue.Forget(obj)
+		glog.Infof("Service controller successfully synced '%s'", key)
+		return nil
+	}(obj)
+
+	if err != nil {
+		utilruntime.HandleError(err)
+		return true
 	}
+	return true
 }
 
-func (c *ServiceController) onDelete(obj interface{}) {
+func (c *Controller) enqueue(obj interface{}) {
 	svc := obj.(*v1.Service).DeepCopy()
-	glog.V(2).Infof("Received delete on Service %s in %s namespace.", svc.Name, svc.Namespace)
 
-	if slice.Contains(c.conf.IgnoreNamespaces, svc.Namespace) {
+	if funk.Contains(c.cfg.IgnoreNamespaces, svc.Namespace) {
+		glog.V(3).Infof("Service controller ignored '%s/%s'", svc.Namespace, svc.Name)
 		return
 	}
 
-	if len(svc.Spec.Ports) == 0 || len(svc.Spec.ExternalIPs) == 0 {
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
 		return
 	}
-
-	if err := c.cleanup(svc); err != nil {
-		glog.Errorf("Failed to cleanup on Service %s in %s namespace: %+v.", svc.Name, svc.Namespace, err)
-	}
+	c.queue.Add(key)
 }
 
-func (c *ServiceController) makeAnnotations(svc *v1.Service) {
+func (c *Controller) getService(key string) (*v1.Service, error) {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
+		return nil, err
+	}
+
+	svc, err := c.lister.Services(namespace).Get(name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			utilruntime.HandleError(fmt.Errorf("service '%s' in work queue no longer exists", key))
+			return nil, err
+		}
+		return nil, err
+	}
+	return svc, nil
+}
+
+func (c *Controller) makeDefaultPool(svc *v1.Service) error {
 	if svc.Annotations == nil {
 		svc.Annotations = map[string]string{}
 	}
-
-	if _, ok := svc.Annotations[constants.AnnKeyExternalPool]; !ok {
-		svc.Annotations[constants.AnnKeyExternalPool] = constants.DefaultInternetPool
+	if _, ok := svc.Annotations[constants.ExternalPoolKey]; !ok {
+		svc.Annotations[constants.ExternalPoolKey] = c.cfg.PoolName
 	}
+	return nil
 }
 
-func (c *ServiceController) makeRefresh(svc *v1.Service) {
-	ip := svc.Annotations[constants.AnnKeyPublicIP]
-	if util.ParseIP(ip) == nil {
-		svc.Annotations[constants.AnnKeyServiceRefresh] = string(uuid.NewUUID())
+func (c *Controller) reconcile(key string) error {
+	service, err := c.getService(key)
+	if err != nil {
+		return err
 	}
-}
 
-func (c *ServiceController) syncSpec(old *v1.Service, svc *v1.Service) error {
-	if slice.Contains(c.conf.IgnoreNamespaces, svc.Namespace) {
+	// If service was deleted, it will clean up IP, NAT, and Security
+	if !service.ObjectMeta.DeletionTimestamp.IsZero() {
+		if err := c.cleanup(service); err != nil {
+			return err
+		}
 		return nil
 	}
 
-	if len(svc.Spec.Ports) == 0 || len(svc.Spec.ExternalIPs) == 0 {
+	if err := c.makeDefaultPool(service); err != nil {
+		return err
+	}
+
+	if len(service.Spec.ExternalIPs) == 0 {
 		return nil
 	}
 
-	if err := c.allocate(svc); err != nil {
-		glog.Errorf("Failed to allocate Public IP: %s.", err)
+	if err := c.allocate(service); err != nil {
+		return err
 	}
 
-	addr := svc.Annotations[constants.AnnKeyPublicIP]
-	if util.ParseIP(addr) != nil {
-		c.syncNAT(svc, addr)
-		c.syncSecurity(svc, addr)
+	address := net.ParseIP(service.Annotations[constants.PublicIPKey])
+	if address == nil {
+		return fmt.Errorf("failed to get public IP")
 	}
 
-	c.makeRefresh(svc)
-	if _, err := k8sutil.UpdateService(c.ctx.Clientset, svc.Namespace, svc); err != nil {
+	if err := c.createNAT(address.String(), service); err != nil {
+		return err
+	}
+
+	if err := c.createSecurity(address.String(), service); err != nil {
+		return err
+	}
+
+	svcCopy := service.DeepCopy()
+	if _, err := c.clientset.CoreV1().Services(svcCopy.Namespace).Update(svcCopy); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *ServiceController) allocate(svc *v1.Service) error {
-	pool := svc.Annotations[constants.AnnKeyExternalPool]
-	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
-	if public == nil && pool != "" {
-		name := svc.Spec.ExternalIPs[0]
-		namespace := svc.Namespace
-		ip, err := k8sutil.GetIP(c.client, name, namespace)
-		if err == nil {
-			if ip.Status.Address != "" {
-				delete(svc.Annotations, constants.AnnKeyServiceRefresh)
-				svc.Annotations[constants.AnnKeyPublicIP] = ip.Status.Address
-			}
-			return nil
-		}
+func (c *Controller) cleanup(svc *v1.Service) error {
+	svcCopy := svc.DeepCopy()
+	address := net.ParseIP(svcCopy.Annotations[constants.PublicIPKey])
+	if address == nil {
+		return nil
+	}
 
-		if _, err := k8sutil.CreateIP(c.client, name, namespace, pool); err != nil {
+	// If service hasn't any finalizer, it will delete
+	if !funk.ContainsString(svcCopy.ObjectMeta.Finalizers, constants.Finalizer) {
+		if err := c.clientset.CoreV1().Services(svcCopy.Namespace).Delete(svcCopy.Name, nil); err != nil {
 			return err
 		}
+		return nil
+	}
+
+	svcs, err := c.clientset.CoreV1().Services(svcCopy.Namespace).List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	items := funk.Filter(svcs.Items, func(s v1.Service) bool {
+		v := s.Annotations[constants.PublicIPKey]
+		return v == address.String()
+	})
+
+	// If this namespace has other services are used the same public IP,
+	// it will not release this public IP
+	if len(items.([]v1.Service)) > 1 {
+		if err := c.removeFinalizer(svcCopy); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if err := c.deallocate(svcCopy); err != nil {
+		return err
+	}
+	glog.V(3).Infof("Service controller has been deleted IP.")
+
+	if err := c.deleteNAT(address.String(), svcCopy); err != nil {
+		return err
+	}
+	glog.V(3).Infof("Service controller has been deleted NAT.")
+
+	if err := c.deleteSecurity(address.String(), svcCopy); err != nil {
+		return err
+	}
+	glog.V(3).Infof("Service controller has been deleted Security.")
+
+	if err := c.removeFinalizer(svcCopy); err != nil {
+		return err
 	}
 	return nil
 }
 
-// Sync the PA NAT policies
-func (c *ServiceController) syncNAT(svc *v1.Service, addr string) {
-	name := fmt.Sprintf("k8s-%s", addr)
-	if err := k8sutil.CreateNAT(c.client, name, addr, svc); err != nil {
-		glog.Warningf("Failed to create NAT resource: %+v.", err)
-	}
-}
+func (c *Controller) removeFinalizer(svc *v1.Service) error {
+	svc.ObjectMeta.Finalizers = funk.FilterString(svc.ObjectMeta.Finalizers, func(s string) bool {
+		return s != constants.Finalizer
+	})
 
-// Sync the PA Security policies
-func (c *ServiceController) syncSecurity(svc *v1.Service, addr string) {
-	addrs := []string{"any"}
-	ns, _ := c.ctx.Clientset.CoreV1().Namespaces().Get(svc.Namespace, metav1.GetOptions{})
-	if value, ok := ns.Annotations[constants.AnnKeyWhiteListAddresses]; ok {
-		addrString := strings.TrimSpace(value)
-		if len(addrString) > 0 {
-			addrs = strings.Split(addrString, ",")
-		}
-	}
-
-	name := fmt.Sprintf("k8s-%s", addr)
-	secPara := &k8sutil.SecurityParameter{
-		Name:             name,
-		Address:          addr,
-		Log:              c.conf.LogSettingName,
-		Group:            c.conf.GroupName,
-		Services:         c.conf.Services,
-		DestinationZones: c.conf.DestinationZones,
-		SourceAddresses:  addrs,
-	}
-	if err := k8sutil.CreateSecurity(c.client, secPara, svc); err != nil {
-		glog.Warningf("Failed to create and update Security resource: %+v.", err)
-	}
-}
-
-func (c *ServiceController) cleanup(svc *v1.Service) error {
-	pool := svc.Annotations[constants.AnnKeyExternalPool]
-	public := util.ParseIP(svc.Annotations[constants.AnnKeyPublicIP])
-	if public != nil && pool != "" {
-		namespace := svc.Namespace
-		svcs, err := k8sutil.GetServiceList(c.ctx.Clientset, namespace)
-		if err != nil {
-			return err
-		}
-
-		k8sutil.FilterServices(svcs, public.String())
-		if len(svcs.Items) != 0 {
-			return nil
-		}
-
-		if err := k8sutil.DeleteIP(c.client, svc.Spec.ExternalIPs[0], namespace); err != nil {
-			return err
-		}
-
-		name := fmt.Sprintf("k8s-%s", public.String())
-		if err := k8sutil.DeleteSecurity(c.client, name, namespace); err != nil {
-			glog.Warningf("Failed to delete Security resource: %+v.", err)
-		}
-
-		if err := k8sutil.DeleteNAT(c.client, name, namespace); err != nil {
-			glog.Warningf("Failed to delete NAT resource: %+v.", err)
-		}
-		return nil
+	if _, err := c.clientset.CoreV1().Services(svc.Namespace).Update(svc); err != nil {
+		return err
 	}
 	return nil
 }

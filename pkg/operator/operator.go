@@ -1,5 +1,5 @@
 /*
-Copyright © 2018 inwinSTACK.inc
+Copyright © 2018 inwinSTACK Inc
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,100 +17,62 @@ limitations under the License.
 package operator
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-	clientset "github.com/inwinstack/blended/client/clientset/versioned"
-	opkit "github.com/inwinstack/operator-kit"
+	blended "github.com/inwinstack/blended/client/clientset/versioned"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
-	"github.com/inwinstack/pa-svc-syncker/pkg/k8sutil"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator/namespace"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator/service"
-	v1 "k8s.io/api/core/v1"
-	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 )
 
-const (
-	initRetryDelay = 10 * time.Second
-	interval       = 500 * time.Millisecond
-	timeout        = 60 * time.Second
-)
+const defaultSyncTime = time.Second * 30
 
+// Operator represents an operator context
 type Operator struct {
-	ctx       *opkit.Context
-	conf      *config.OperatorConfig
-	service   *service.ServiceController
-	namespace *namespace.NamespaceController
+	clientset  kubernetes.Interface
+	blendedset blended.Interface
+	informer   informers.SharedInformerFactory
+
+	cfg *config.Config
+
+	service   *service.Controller
+	namespace *namespace.Controller
 }
 
-func NewMainOperator(conf *config.OperatorConfig) *Operator {
-	return &Operator{conf: conf}
-}
-
-func (o *Operator) Initialize() error {
-	ctx, clientset, err := o.initContextAndClient()
-	if err != nil {
-		return err
+// New creates an instance of the operator
+func New(cfg *config.Config, clientset kubernetes.Interface, blendedset blended.Interface) *Operator {
+	o := &Operator{
+		cfg:        cfg,
+		clientset:  clientset,
+		blendedset: blendedset,
 	}
 
-	o.service = service.NewController(ctx, clientset, o.conf)
-	o.namespace = namespace.NewController(ctx, clientset, o.conf)
-	o.ctx = ctx
+	o.informer = informers.NewSharedInformerFactory(clientset, defaultSyncTime)
+	o.service = service.NewController(cfg, clientset, blendedset, o.informer.Core().V1().Services())
+	o.namespace = namespace.NewController(cfg, clientset, blendedset, o.informer.Core().V1().Namespaces())
+	return o
+}
+
+// Run serves an isntance of the operator
+func (o *Operator) Run(ctx context.Context) error {
+	go o.informer.Start(ctx.Done())
+
+	if err := o.service.Run(ctx, o.cfg.Threads); err != nil {
+		return fmt.Errorf("failed to run service controller: %s", err.Error())
+	}
+
+	if err := o.namespace.Run(ctx, o.cfg.Threads); err != nil {
+		return fmt.Errorf("failed to run namespace controller: %s", err.Error())
+	}
 	return nil
 }
 
-func (o *Operator) initContextAndClient() (*opkit.Context, clientset.Interface, error) {
-	glog.V(2).Info("Initialize the operator context and client.")
-
-	config, err := k8sutil.GetRestConfig(o.conf.Kubeconfig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to get Kubernetes config. %+v", err)
-	}
-
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to get Kubernetes client. %+v", err)
-	}
-
-	extensionsclient, err := apiextensionsclientset.NewForConfig(config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create Kubernetes API extension clientset. %+v", err)
-	}
-
-	inwinclient, err := clientset.NewForConfig(config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create blended clientset. %+v", err)
-	}
-
-	ctx := &opkit.Context{
-		Clientset:             client,
-		APIExtensionClientset: extensionsclient,
-		Interval:              interval,
-		Timeout:               timeout,
-	}
-	return ctx, inwinclient, nil
-}
-
-func (o *Operator) Run() error {
-	signalChan := make(chan os.Signal, 1)
-	stopChan := make(chan struct{})
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// start watching the resources
-	o.service.StartWatch(v1.NamespaceAll, stopChan)
-	o.namespace.StartWatch(v1.NamespaceAll, stopChan)
-
-	for {
-		select {
-		case <-signalChan:
-			glog.Infof("Shutdown signal received, exiting...")
-			close(stopChan)
-			return nil
-		}
-	}
+// Stop stops all controllers
+func (o *Operator) Stop() {
+	o.service.Stop()
+	o.namespace.Stop()
 }

@@ -27,4 +27,3 @@ spec:
         - --v=2
         - --logtostderr=true
         - --ignore-namespaces=kube-system,default,kube-public
-        - --services=k8s-tcp,k8s-udp

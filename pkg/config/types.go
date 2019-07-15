@@ -1,5 +1,5 @@
 /*
-Copyright © 2018 inwinSTACK.inc
+Copyright © 2018 inwinSTACK Inc
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,12 +16,20 @@ limitations under the License.
 
 package config
 
-type OperatorConfig struct {
-	Kubeconfig       string
+// Config contains the operator config
+type Config struct {
+	Threads int
+
+	SourceZones      []string
+	SourceUsers      []string
+	HipProfiles      []string
+	Applications     []string
+	Categories       []string
 	IgnoreNamespaces []string
 	Services         []string
 	DestinationZones []string
-	Retry            int
 	LogSettingName   string
 	GroupName        string
+	PoolName         string
+	PoolIPRanges     []string
 }

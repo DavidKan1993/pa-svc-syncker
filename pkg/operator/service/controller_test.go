@@ -1,5 +1,5 @@
 /*
-Copyright © 2018 inwinSTACK.inc
+Copyright © 2018 inwinSTACK Inc
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,131 +17,155 @@ limitations under the License.
 package service
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	inwinv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-
-	fake "github.com/inwinstack/blended/client/clientset/versioned/fake"
-	opkit "github.com/inwinstack/operator-kit"
+	blendedv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
+	blendedfake "github.com/inwinstack/blended/client/clientset/versioned/fake"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
-	extensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
-	corefake "k8s.io/client-go/kubernetes/fake"
-
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestController(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	coreClient := corefake.NewSimpleClientset()
-	extensionsClient := extensionsfake.NewSimpleClientset()
+func TestServiceController(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := &config.Config{
+		Threads:          2,
+		PoolName:         "internet",
+		IgnoreNamespaces: []string{"kube-system", "kube-public", "default"},
+		SourceZones:      []string{"untrust"},
+		DestinationZones: []string{"test"},
+		SourceUsers:      []string{"any"},
+		HipProfiles:      []string{"any"},
+		Applications:     []string{"any"},
+		Categories:       []string{"any"},
+		Services:         []string{"k8s-tcp", "k8s-udp"},
+		GroupName:        "",
+		LogSettingName:   "",
+	}
 
-	ns := &v1.Namespace{
+	clientset := fake.NewSimpleClientset()
+	blendedset := blendedfake.NewSimpleClientset()
+	informer := informers.NewSharedInformerFactory(clientset, 0)
+
+	controller := NewController(cfg, clientset, blendedset, informer.Core().V1().Services())
+	go informer.Start(ctx.Done())
+	assert.Nil(t, controller.Run(ctx, cfg.Threads))
+
+	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "default",
-			Namespace: "",
+			Name: "test1",
 			Annotations: map[string]string{
-				constants.AnnKeyExternalPool:       "internet",
-				constants.AnnKeyWhiteListAddresses: "172.22.132.99, 172.22.131.0/32",
+				constants.WhiteListAddressesKey: "172.22.132.99,172.22.131.0/32",
 			},
 		},
 	}
-	_, nserr := coreClient.CoreV1().Namespaces().Create(ns)
+	_, nserr := clientset.CoreV1().Namespaces().Create(ns)
 	assert.Nil(t, nserr)
 
-	ip := &inwinv1.IP{
+	ip := &blendedv1.IP{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "172.11.22.33",
-			Namespace: "default",
+			Namespace: ns.Name,
 		},
-		Spec: inwinv1.IPSpec{
-			PoolName: "internet",
+		Spec: blendedv1.IPSpec{
+			PoolName: cfg.PoolName,
 		},
-		Status: inwinv1.IPStatus{
-			Phase:   inwinv1.IPActive,
+		Status: blendedv1.IPStatus{
+			Phase:   blendedv1.IPActive,
 			Address: "140.11.22.33",
 		},
 	}
-	_, iperr := client.InwinstackV1().IPs("default").Create(ip)
+	_, iperr := blendedset.InwinstackV1().IPs(ip.Namespace).Create(ip)
 	assert.Nil(t, iperr)
 
-	svc := &v1.Service{
+	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-svc",
-			Namespace: "default",
+			Namespace: ns.Name,
 			Annotations: map[string]string{
-				constants.AnnKeyExternalPool: "internet",
+				constants.ExternalPoolKey: cfg.PoolName,
 			},
 		},
-		Spec: v1.ServiceSpec{
+		Spec: corev1.ServiceSpec{
 			ExternalIPs: []string{"172.11.22.33"},
-			Type:        v1.ServiceTypeLoadBalancer,
-			Ports: []v1.ServicePort{
-				v1.ServicePort{
+			Type:        corev1.ServiceTypeLoadBalancer,
+			Ports: []corev1.ServicePort{
+				corev1.ServicePort{
 					Port:     80,
-					Protocol: v1.ProtocolTCP,
+					Protocol: corev1.ProtocolTCP,
 				},
 			},
 		},
 	}
-	_, svcerr := coreClient.CoreV1().Services("default").Create(svc)
+	_, svcerr := clientset.CoreV1().Services(svc.Namespace).Create(svc)
 	assert.Nil(t, svcerr)
 
-	ctx := &opkit.Context{
-		Clientset:             coreClient,
-		APIExtensionClientset: extensionsClient,
-		Interval:              500 * time.Millisecond,
-		Timeout:               60 * time.Second,
+	// Check IP address
+	failed := true
+	for start := time.Now(); time.Since(start) < 2*time.Second; {
+		svc, err := clientset.CoreV1().Services(ns.Name).Get(svc.Name, metav1.GetOptions{})
+		assert.Nil(t, err)
+		if address, ok := svc.Annotations[constants.PublicIPKey]; ok {
+			assert.Equal(t, ip.Status.Address, address)
+			failed = false
+			break
+		}
 	}
+	assert.Equal(t, false, failed, "cannot get public IP.")
 
-	conf := &config.OperatorConfig{
-		IgnoreNamespaces: []string{"kube-system", "kube-public"},
-		Retry:            5,
-		Services:         []string{"k8s-tcp", "k8s-udp"},
-		GroupName:        "",
-		LogSettingName:   "",
-		DestinationZones: []string{"test"},
+	// Check NAT and Security
+	failed = true
+	name := fmt.Sprintf("%s-%s", constants.PolicyPrefix, ip.Status.Address)
+	for start := time.Now(); time.Since(start) < 2*time.Second; {
+		nat, _ := blendedset.InwinstackV1().NATs(ns.Name).Get(name, metav1.GetOptions{})
+		if nat != nil {
+			assert.Equal(t, ip.Status.Address, nat.Spec.DestinationAddresses[0])
+			assert.Equal(t, svc.Spec.ExternalIPs[0], nat.Spec.DatAddress)
+			failed = false
+			break
+		}
 	}
-	controller := NewController(ctx, client, conf)
+	assert.Equal(t, false, failed, "cannot get NAT.")
 
-	// Test onAdd
-	controller.onAdd(svc)
+	failed = true
+	for start := time.Now(); time.Since(start) < 2*time.Second; {
+		sec, _ := blendedset.InwinstackV1().Securities(ns.Name).Get(name, metav1.GetOptions{})
+		if sec != nil {
+			assert.Equal(t, ip.Status.Address, sec.Spec.DestinationAddresses[0])
+			assert.Equal(t, cfg.Services, sec.Spec.Services)
+			assert.Equal(t, cfg.DestinationZones, sec.Spec.DestinationZones)
+			assert.Equal(t, []string{"172.22.132.99", "172.22.131.0/32"}, sec.Spec.SourceAddresses)
+			failed = false
+			break
+		}
+	}
+	assert.Equal(t, false, failed, "cannot get Security.")
 
-	usvc, err := coreClient.CoreV1().Services("default").Get("test-svc", metav1.GetOptions{})
+	// Test for deleting
+	newSvc, _ := clientset.CoreV1().Services(ns.Name).Get(svc.Name, metav1.GetOptions{})
+	assert.Nil(t, clientset.CoreV1().Services(ns.Name).Delete(svc.Name, nil))
+
+	controller.cleanup(newSvc)
+
+	ipList, err := blendedset.InwinstackV1().IPs(ns.Name).List(metav1.ListOptions{})
 	assert.Nil(t, err)
+	assert.Equal(t, 0, len(ipList.Items))
 
-	publicIP, ok := usvc.Annotations[constants.AnnKeyPublicIP]
-	assert.True(t, ok)
-	assert.Equal(t, ip.Status.Address, publicIP)
-
-	// Test onUpdate
-	controller.onUpdate(svc, usvc)
-
-	name := fmt.Sprintf("k8s-%s", ip.Status.Address)
-	nat, err := client.InwinstackV1().NATs("default").Get(name, metav1.GetOptions{})
+	natList, err := blendedset.InwinstackV1().NATs(ns.Name).List(metav1.ListOptions{})
 	assert.Nil(t, err)
-	assert.Equal(t, ip.Status.Address, nat.Spec.DestinationAddresses[0])
-	assert.Equal(t, usvc.Spec.ExternalIPs[0], nat.Spec.DatAddress)
+	assert.Equal(t, 0, len(natList.Items))
 
-	sec, err := client.InwinstackV1().Securities("default").Get(name, metav1.GetOptions{})
-	assert.Equal(t, ip.Status.Address, sec.Spec.DestinationAddresses[0])
-	assert.Equal(t, conf.Services, sec.Spec.Services)
-	assert.Equal(t, conf.DestinationZones, sec.Spec.DestinationZones)
+	secList, err := blendedset.InwinstackV1().Securities(ns.Name).List(metav1.ListOptions{})
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(secList.Items))
 
-	// Test onDelete
-	assert.Nil(t, coreClient.CoreV1().Services("default").Delete("test-svc", nil))
-	controller.onDelete(usvc)
-
-	_, iperr1 := client.InwinstackV1().IPs("default").Get(ip.Name, metav1.GetOptions{})
-	assert.NotNil(t, iperr1)
-
-	_, naterr := client.InwinstackV1().NATs("default").Get(name, metav1.GetOptions{})
-	assert.NotNil(t, naterr)
-
-	_, secerr := client.InwinstackV1().Securities("default").Get(name, metav1.GetOptions{})
-	assert.NotNil(t, secerr)
+	cancel()
+	controller.Stop()
 }

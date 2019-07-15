@@ -15,14 +15,10 @@ $(shell mkdir -p ./out)
 build: out/controller
 
 .PHONY: out/controller
-out/controller:
+out/controller: 
 	GOOS=$(GOOS) go build \
 	  -ldflags="-s -w -X $(REPOPATH)/pkg/version.version=$(VERSION)" \
 	  -a -o $@ cmd/main.go
-
-.PHONY: dep 
-dep:
-	dep ensure
 
 .PHONY: test
 test:
