@@ -287,7 +287,6 @@ func (c *Controller) removeFinalizer(svc *v1.Service) error {
 	svc.ObjectMeta.Finalizers = funk.FilterString(svc.ObjectMeta.Finalizers, func(s string) bool {
 		return s != constants.Finalizer
 	})
-
 	if _, err := c.clientset.CoreV1().Services(svc.Namespace).Update(svc); err != nil {
 		return err
 	}
