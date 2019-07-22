@@ -50,8 +50,11 @@ func New(cfg *config.Config, clientset kubernetes.Interface, blendedset blended.
 		clientset:  clientset,
 		blendedset: blendedset,
 	}
-
-	o.informer = informers.NewSharedInformerFactory(clientset, defaultSyncTime)
+	t := defaultSyncTime
+	if cfg.SyncSec > 30 {
+		t = time.Second * time.Duration(cfg.SyncSec)
+	}
+	o.informer = informers.NewSharedInformerFactory(clientset, t)
 	o.service = service.NewController(cfg, clientset, blendedset, o.informer.Core().V1().Services())
 	o.namespace = namespace.NewController(cfg, clientset, blendedset, o.informer.Core().V1().Namespaces())
 	return o

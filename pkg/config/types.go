@@ -18,8 +18,8 @@ package config
 
 // Config contains the operator config
 type Config struct {
-	Threads int
-
+	Threads          int
+	SyncSec          int
 	SourceZones      []string
 	SourceUsers      []string
 	HipProfiles      []string

@@ -44,6 +44,7 @@ var (
 func parserFlags() {
 	flag.StringVarP(&kubeconfig, "kubeconfig", "", "", "Absolute path to the kubeconfig file.")
 	flag.IntVarP(&cfg.Threads, "threads", "", 2, "Number of worker threads used by the controller.")
+	flag.IntVarP(&cfg.SyncSec, "sync-seconds", "", 30, "Seconds for syncing and retrying objects.")
 	flag.StringSliceVarP(&cfg.IgnoreNamespaces, "ignore-namespaces", "", nil, "Ignore namespaces for syncing objects.")
 	flag.StringSliceVarP(&cfg.Services, "services", "", []string{"k8s-tcp", "k8s-udp"}, "The service objects of security policy.")
 	flag.StringSliceVarP(&cfg.SourceZones, "source-zones", "", []string{"untrust"}, "The source zones of security policy.")
