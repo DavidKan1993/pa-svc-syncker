@@ -23,7 +23,8 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	blended "github.com/inwinstack/blended/client/clientset/versioned"
+	blended "github.com/inwinstack/blended/generated/clientset/versioned"
+	"github.com/inwinstack/blended/k8sutil"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	"github.com/thoas/go-funk"
@@ -222,6 +223,10 @@ func (c *Controller) reconcile(key string) error {
 	}
 
 	svcCopy := service.DeepCopy()
+	if !funk.ContainsString(svcCopy.Finalizers, constants.Finalizer) {
+		k8sutil.AddFinalizer(&svcCopy.ObjectMeta, constants.Finalizer)
+	}
+
 	if _, err := c.clientset.CoreV1().Services(svcCopy.Namespace).Update(svcCopy); err != nil {
 		return err
 	}
@@ -284,9 +289,7 @@ func (c *Controller) cleanup(svc *v1.Service) error {
 }
 
 func (c *Controller) removeFinalizer(svc *v1.Service) error {
-	svc.ObjectMeta.Finalizers = funk.FilterString(svc.ObjectMeta.Finalizers, func(s string) bool {
-		return s != constants.Finalizer
-	})
+	k8sutil.RemoveFinalizer(&svc.ObjectMeta, constants.Finalizer)
 	if _, err := c.clientset.CoreV1().Services(svc.Namespace).Update(svc); err != nil {
 		return err
 	}

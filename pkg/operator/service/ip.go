@@ -23,7 +23,6 @@ import (
 
 	blendedv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
-	"github.com/thoas/go-funk"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -50,9 +49,6 @@ func (c *Controller) allocate(svc *v1.Service) error {
 		if err == nil {
 			if net.ParseIP(ip.Status.Address) != nil {
 				svc.Annotations[constants.PublicIPKey] = ip.Status.Address
-				if !funk.ContainsString(svc.ObjectMeta.Finalizers, constants.Finalizer) {
-					svc.ObjectMeta.Finalizers = append(svc.ObjectMeta.Finalizers, constants.Finalizer)
-				}
 			}
 			return nil
 		}

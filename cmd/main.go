@@ -25,7 +25,7 @@ import (
 	"syscall"
 
 	"github.com/golang/glog"
-	blended "github.com/inwinstack/blended/client/clientset/versioned"
+	blended "github.com/inwinstack/blended/generated/clientset/versioned"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator"
 	"github.com/inwinstack/pa-svc-syncker/pkg/version"
@@ -63,7 +63,7 @@ func parserFlags() {
 
 func restConfig(kubeconfig string) (*rest.Config, error) {
 	if kubeconfig != "" {
-		cfg, err := clientcmd.BuildConfigFromFlags("master", kubeconfig)
+		cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, err
 		}

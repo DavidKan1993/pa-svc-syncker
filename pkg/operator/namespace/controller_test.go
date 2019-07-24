@@ -23,7 +23,7 @@ import (
 	"time"
 
 	blendedv1 "github.com/inwinstack/blended/apis/inwinstack/v1"
-	blendedfake "github.com/inwinstack/blended/client/clientset/versioned/fake"
+	blendedfake "github.com/inwinstack/blended/generated/clientset/versioned/fake"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	"github.com/stretchr/testify/assert"

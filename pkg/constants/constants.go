@@ -33,8 +33,6 @@ package constants
 
 const Finalizer = "kubernetes"
 
-const CustomFinalizer = "finalizer.inwinstack.com"
-
 const PolicyPrefix = "k8s"
 
 // Annotation Keys

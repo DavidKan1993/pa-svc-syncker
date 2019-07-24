@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	blended "github.com/inwinstack/blended/client/clientset/versioned"
+	blended "github.com/inwinstack/blended/generated/clientset/versioned"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator/namespace"
 	"github.com/inwinstack/pa-svc-syncker/pkg/operator/service"
