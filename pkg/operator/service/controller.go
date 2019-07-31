@@ -24,7 +24,6 @@ import (
 
 	"github.com/golang/glog"
 	blended "github.com/inwinstack/blended/generated/clientset/versioned"
-	"github.com/inwinstack/blended/k8sutil"
 	"github.com/inwinstack/pa-svc-syncker/pkg/config"
 	"github.com/inwinstack/pa-svc-syncker/pkg/constants"
 	"github.com/thoas/go-funk"
@@ -108,7 +107,6 @@ func (c *Controller) runWorker() {
 
 func (c *Controller) processNextWorkItem() bool {
 	obj, shutdown := c.queue.Get()
-
 	if shutdown {
 		return false
 	}
@@ -128,7 +126,7 @@ func (c *Controller) processNextWorkItem() bool {
 		}
 
 		c.queue.Forget(obj)
-		glog.Infof("Service controller successfully synced '%s'", key)
+		glog.V(2).Infof("Service controller successfully synced '%s'", key)
 		return nil
 	}(obj)
 
@@ -141,7 +139,6 @@ func (c *Controller) processNextWorkItem() bool {
 
 func (c *Controller) enqueue(obj interface{}) {
 	svc := obj.(*v1.Service).DeepCopy()
-
 	if funk.Contains(c.cfg.IgnoreNamespaces, svc.Namespace) {
 		glog.V(3).Infof("Service controller ignored '%s/%s'", svc.Namespace, svc.Name)
 		return
@@ -155,79 +152,40 @@ func (c *Controller) enqueue(obj interface{}) {
 	c.queue.Add(key)
 }
 
-func (c *Controller) getService(key string) (*v1.Service, error) {
+func (c *Controller) reconcile(key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
-		return nil, err
+		return err
 	}
 
 	svc, err := c.lister.Services(namespace).Get(name)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			utilruntime.HandleError(fmt.Errorf("service '%s' in work queue no longer exists", key))
-			return nil, err
+			return err
 		}
-		return nil, err
-	}
-	return svc, nil
-}
-
-func (c *Controller) makeDefaultPool(svc *v1.Service) error {
-	if svc.Annotations == nil {
-		svc.Annotations = map[string]string{}
-	}
-	if _, ok := svc.Annotations[constants.ExternalPoolKey]; !ok {
-		svc.Annotations[constants.ExternalPoolKey] = c.cfg.PoolName
-	}
-	return nil
-}
-
-func (c *Controller) reconcile(key string) error {
-	service, err := c.getService(key)
-	if err != nil {
 		return err
 	}
 
-	// If service was deleted, it will clean up IP, NAT, and Security
-	if !service.ObjectMeta.DeletionTimestamp.IsZero() {
-		if err := c.cleanup(service); err != nil {
+	// If service was deleted, it will clean up NAT, and Security
+	if !svc.ObjectMeta.DeletionTimestamp.IsZero() {
+		if err := c.cleanup(svc); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	if err := c.makeDefaultPool(service); err != nil {
-		return err
-	}
-
-	if len(service.Spec.ExternalIPs) == 0 {
-		return nil
-	}
-
-	if err := c.allocate(service); err != nil {
-		return err
-	}
-
-	address := net.ParseIP(service.Annotations[constants.PublicIPKey])
+	address := net.ParseIP(svc.Annotations[constants.PublicIPKey])
 	if address == nil {
-		return fmt.Errorf("failed to get public IP")
+		return fmt.Errorf("failed to get the public IP")
 	}
 
-	if err := c.createNAT(address.String(), service); err != nil {
+	if err := c.createNAT(address.String(), svc); err != nil {
 		return err
 	}
 
-	if err := c.createSecurity(address.String(), service); err != nil {
-		return err
-	}
-
-	svcCopy := service.DeepCopy()
-	if !funk.ContainsString(svcCopy.Finalizers, constants.Finalizer) {
-		k8sutil.AddFinalizer(&svcCopy.ObjectMeta, constants.Finalizer)
-	}
-
-	if _, err := c.clientset.CoreV1().Services(svcCopy.Namespace).Update(svcCopy); err != nil {
+	if err := c.createSecurity(address.String(), svc); err != nil {
 		return err
 	}
 	return nil
@@ -237,14 +195,6 @@ func (c *Controller) cleanup(svc *v1.Service) error {
 	svcCopy := svc.DeepCopy()
 	address := net.ParseIP(svcCopy.Annotations[constants.PublicIPKey])
 	if address == nil {
-		return nil
-	}
-
-	// If service hasn't any finalizer, it will delete
-	if !funk.ContainsString(svcCopy.ObjectMeta.Finalizers, constants.Finalizer) {
-		if err := c.clientset.CoreV1().Services(svcCopy.Namespace).Delete(svcCopy.Name, nil); err != nil {
-			return err
-		}
 		return nil
 	}
 
@@ -259,38 +209,16 @@ func (c *Controller) cleanup(svc *v1.Service) error {
 	})
 
 	// If this namespace has other services are used the same public IP,
-	// it will not release this public IP
+	// it will not release the Security and NAT.
 	if len(items.([]v1.Service)) > 1 {
-		if err := c.removeFinalizer(svcCopy); err != nil {
-			return err
-		}
 		return nil
 	}
-
-	if err := c.deallocate(svcCopy); err != nil {
-		return err
-	}
-	glog.V(3).Infof("Service controller has been deleted IP.")
 
 	if err := c.deleteNAT(address.String(), svcCopy); err != nil {
 		return err
 	}
-	glog.V(3).Infof("Service controller has been deleted NAT.")
 
 	if err := c.deleteSecurity(address.String(), svcCopy); err != nil {
-		return err
-	}
-	glog.V(3).Infof("Service controller has been deleted Security.")
-
-	if err := c.removeFinalizer(svcCopy); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Controller) removeFinalizer(svc *v1.Service) error {
-	k8sutil.RemoveFinalizer(&svc.ObjectMeta, constants.Finalizer)
-	if _, err := c.clientset.CoreV1().Services(svc.Namespace).Update(svc); err != nil {
 		return err
 	}
 	return nil

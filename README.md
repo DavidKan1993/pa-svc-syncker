@@ -1,16 +1,9 @@
 [![Build Status](https://travis-ci.org/inwinstack/pa-svc-syncker.svg?branch=master)](https://travis-ci.org/inwinstack/pa-svc-syncker) [![codecov](https://codecov.io/gh/inwinstack/pa-svc-syncker/branch/master/graph/badge.svg)](https://codecov.io/gh/inwinstack/pa-svc-syncker) [![Docker Pulls](https://img.shields.io/docker/pulls/inwinstack/pa-svc-syncker.svg)](https://hub.docker.com/r/inwinstack/pa-svc-syncker/) ![Hex.pm](https://img.shields.io/hexpm/l/plug.svg)
 # PA Kubernetes Service Syncker
-The PA Service Syncker for Kubernetes provides automation synchronizing definitions for Kubernetes services to set the PA NAT and Security.
+The PA Service Syncker for Kubernetes provides automation synchronizing definitions for Kubernetes Services to set the NAT/Security policy.
 
 ### Requirements
 The PA Service Syncker depend on [PA Controller](https://github.com/inwinstack/pa-controller).
-
-#### Compatibility Matrix
-
-| PA Controller version | 0.7.x | 0.6.x | 0.5.x | 
-|-----------------------|-------|-------|-------| 
-| 0.6.x                 | Y     | Y     | Y     |
-| 0.5.x                 | Y     | Y     | Y     |
 
 ## Building from Source
 Clone repo into your go path under `$GOPATH/src`:

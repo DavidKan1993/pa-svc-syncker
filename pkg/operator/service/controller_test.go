@@ -33,11 +33,12 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const timeout = 3 * time.Second
+
 func TestServiceController(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := &config.Config{
 		Threads:          2,
-		PoolName:         "internet",
 		IgnoreNamespaces: []string{"kube-system", "kube-public", "default"},
 		SourceZones:      []string{"untrust"},
 		DestinationZones: []string{"test"},
@@ -75,7 +76,7 @@ func TestServiceController(t *testing.T) {
 			Namespace: ns.Name,
 		},
 		Spec: blendedv1.IPSpec{
-			PoolName: cfg.PoolName,
+			PoolName: "test",
 		},
 		Status: blendedv1.IPStatus{
 			Phase:   blendedv1.IPActive,
@@ -90,7 +91,7 @@ func TestServiceController(t *testing.T) {
 			Name:      "test-svc",
 			Namespace: ns.Name,
 			Annotations: map[string]string{
-				constants.ExternalPoolKey: cfg.PoolName,
+				constants.PublicIPKey: "140.11.22.33",
 			},
 		},
 		Spec: corev1.ServiceSpec{
@@ -107,23 +108,10 @@ func TestServiceController(t *testing.T) {
 	_, svcerr := clientset.CoreV1().Services(svc.Namespace).Create(svc)
 	assert.Nil(t, svcerr)
 
-	// Check IP address
-	failed := true
-	for start := time.Now(); time.Since(start) < 2*time.Second; {
-		svc, err := clientset.CoreV1().Services(ns.Name).Get(svc.Name, metav1.GetOptions{})
-		assert.Nil(t, err)
-		if address, ok := svc.Annotations[constants.PublicIPKey]; ok {
-			assert.Equal(t, ip.Status.Address, address)
-			failed = false
-			break
-		}
-	}
-	assert.Equal(t, false, failed, "cannot get public IP.")
-
 	// Check NAT and Security
-	failed = true
+	failed := true
 	name := fmt.Sprintf("%s-%s", constants.PolicyPrefix, ip.Status.Address)
-	for start := time.Now(); time.Since(start) < 2*time.Second; {
+	for start := time.Now(); time.Since(start) < timeout; {
 		nat, _ := blendedset.InwinstackV1().NATs(ns.Name).Get(name, metav1.GetOptions{})
 		if nat != nil {
 			assert.Equal(t, ip.Status.Address, nat.Spec.DestinationAddresses[0])
@@ -135,7 +123,7 @@ func TestServiceController(t *testing.T) {
 	assert.Equal(t, false, failed, "cannot get NAT.")
 
 	failed = true
-	for start := time.Now(); time.Since(start) < 2*time.Second; {
+	for start := time.Now(); time.Since(start) < timeout; {
 		sec, _ := blendedset.InwinstackV1().Securities(ns.Name).Get(name, metav1.GetOptions{})
 		if sec != nil {
 			assert.Equal(t, ip.Status.Address, sec.Spec.DestinationAddresses[0])
@@ -153,10 +141,6 @@ func TestServiceController(t *testing.T) {
 	assert.Nil(t, clientset.CoreV1().Services(ns.Name).Delete(svc.Name, nil))
 
 	controller.cleanup(newSvc)
-
-	ipList, err := blendedset.InwinstackV1().IPs(ns.Name).List(metav1.ListOptions{})
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(ipList.Items))
 
 	natList, err := blendedset.InwinstackV1().NATs(ns.Name).List(metav1.ListOptions{})
 	assert.Nil(t, err)

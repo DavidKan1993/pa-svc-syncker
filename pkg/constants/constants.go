@@ -31,18 +31,10 @@ limitations under the License.
 
 package constants
 
-const Finalizer = "kubernetes"
-
 const PolicyPrefix = "k8s"
 
 // Annotation Keys
 const (
-	// AllowSecurityKey is the key of annotation for enabling security policy
-	AllowSecurityKey = "inwinstack.com/allow-security-policy"
-	// AllowNATKey is the key of annotation for enabling nat policy
-	AllowNATKey = "inwinstack.com/allow-nat-policy"
-	// ExternalPoolKey is the key of annotation for assigning IP from which pool
-	ExternalPoolKey = "inwinstack.com/external-pool"
 	// PublicIPKey is the key of annotation for recording IP
 	PublicIPKey = "inwinstack.com/allocated-public-ip"
 	// ServiceRefreshKey is the key of annotation for refreshing Kubernetes service object

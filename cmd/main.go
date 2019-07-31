@@ -55,7 +55,6 @@ func parserFlags() {
 	flag.StringSliceVarP(&cfg.Categories, "categories", "", []string{"any"}, "The categories of security policy.")
 	flag.StringVarP(&cfg.LogSettingName, "log-setting", "", "", "The log-setting name of security policy.")
 	flag.StringVarP(&cfg.GroupName, "group", "", "", "The group name of security policy.")
-	flag.StringVarP(&cfg.PoolName, "pool", "", "internet", "The pool name of public IP.")
 	flag.BoolVarP(&ver, "version", "", false, "Display the version.")
 	flag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 	flag.Parse()

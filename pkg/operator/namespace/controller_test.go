@@ -33,6 +33,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const timeout = time.Second * 3
+
 func TestNamespaceController(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := &config.Config{
@@ -86,7 +88,7 @@ func TestNamespaceController(t *testing.T) {
 	assert.Nil(t, err)
 
 	failed := true
-	for start := time.Now(); time.Since(start) < 2*time.Second; {
+	for start := time.Now(); time.Since(start) < timeout; {
 		sec, err = blendedset.InwinstackV1().Securities(ns.Name).Get(sec.Name, metav1.GetOptions{})
 		assert.Nil(t, err)
 		if !reflect.DeepEqual(createSec.Spec.SourceAddresses, sec.Spec.SourceAddresses) {

@@ -54,7 +54,6 @@ func NewController(
 	clientset kubernetes.Interface,
 	blendedset blended.Interface,
 	informer informerv1.NamespaceInformer) *Controller {
-
 	controller := &Controller{
 		cfg:        cfg,
 		clientset:  clientset,
@@ -63,8 +62,6 @@ func NewController(
 		synced:     informer.Informer().HasSynced,
 		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Namespaces"),
 	}
-	glog.Info("Setting up the Namespace event handlers.")
-
 	informer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.enqueue,
 		UpdateFunc: func(old, new interface{}) {
@@ -81,13 +78,9 @@ func (c *Controller) Run(ctx context.Context, threadiness int) error {
 	if ok := cache.WaitForCacheSync(ctx.Done(), c.synced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
-
-	glog.Info("Starting Namespace workers")
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, ctx.Done())
 	}
-
-	glog.Info("Started Namespace workers")
 	return nil
 }
 
@@ -105,7 +98,6 @@ func (c *Controller) runWorker() {
 
 func (c *Controller) processNextWorkItem() bool {
 	obj, shutdown := c.queue.Get()
-
 	if shutdown {
 		return false
 	}
@@ -125,7 +117,7 @@ func (c *Controller) processNextWorkItem() bool {
 		}
 
 		c.queue.Forget(obj)
-		glog.Infof("Namespace controller successfully synced '%s'", key)
+		glog.V(2).Infof("Namespace controller successfully synced '%s'", key)
 		return nil
 	}(obj)
 
@@ -138,7 +130,6 @@ func (c *Controller) processNextWorkItem() bool {
 
 func (c *Controller) enqueue(obj interface{}) {
 	ns := obj.(*v1.Namespace).DeepCopy()
-
 	if funk.Contains(c.cfg.IgnoreNamespaces, ns.Name) {
 		glog.V(3).Infof("Namespace controller ignored '%s'", ns.Name)
 		return

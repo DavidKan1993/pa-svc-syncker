@@ -30,6 +30,4 @@ type Config struct {
 	DestinationZones []string
 	LogSettingName   string
 	GroupName        string
-	PoolName         string
-	PoolIPRanges     []string
 }
